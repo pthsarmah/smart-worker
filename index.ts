@@ -1,0 +1,61 @@
+import express from "express";
+import { loginQueue, loginQueueEvents } from "./queues";
+import "./ai-layer/destroy-sandbox.ts"
+import "./workers";
+
+const app = express();
+app.use(express.json());
+const port = parseInt(process.env.PORT || '9090');
+
+app.get("/", async (_, res) => {
+	console.log('hh', process.env.REDIS_HOST, process.env.REDIS_PORT)
+	const job = await loginQueue.add('start-worker', { num: 10, callfile: import.meta.path });
+	res.status(202).json({
+		jobId: job.id,
+		status: 'created',
+	});
+});
+
+app.post("/job", async (req, res) => {
+	const { name, data } = req.body;
+	if (!name || !data) {
+		return res.status(400).json({ error: "Missing name or data" });
+	}
+	const job = await loginQueue.add(name, data, {
+		removeOnComplete: true,
+		removeOnFail: true,
+	});
+
+	try {
+		const result = await job.waitUntilFinished(loginQueueEvents);
+		res.status(200).json({ success: true, result });
+	} catch (error) {
+		const freshJob = await loginQueue.getJob(job.id as string);
+		res.status(200).json({ success: false, result: freshJob?.failedReason });
+	}
+});
+
+app.post("/run-job", async (req, res) => {
+	const jobData = req.body;
+	if (!jobData || !jobData.id) {
+		return res.status(400).json({ error: "Missing job data or job id" });
+	}
+
+	const job = await loginQueue.getJob(jobData.id);
+
+	if (!job) {
+		return res.status(404).json({ error: "Job not found" });
+	}
+
+	try {
+		const result = await job.waitUntilFinished(loginQueueEvents);
+		res.status(200).json({ success: true, result });
+	} catch (error) {
+		const freshJob = await loginQueue.getJob(job.id as string);
+		res.status(200).json({ success: false, result: freshJob?.failedReason });
+	}
+});
+
+app.listen(port, '0.0.0.0', () => {
+	console.log(`Server listening on port ${port}`)
+});
