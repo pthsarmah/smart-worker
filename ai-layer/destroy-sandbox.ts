@@ -41,7 +41,7 @@ export const destroySandbox = async (jobDockerId: string) => {
 	console.log(`Destroying sandbox for job ${jobDockerId}`);
 
 	try {
-		await $`docker stop bun-sandbox-${jobDockerId}`;
+		await $`docker stop bun-sandbox-${jobDockerId}`.quiet();
 		console.log(`Stopped container bun-sandbox-${jobDockerId}`);
 	} catch (e: any) {
 		if (e.stderr && !e.stderr.includes('No such container')) {
@@ -52,7 +52,7 @@ export const destroySandbox = async (jobDockerId: string) => {
 	}
 
 	try {
-		await $`docker stop sandbox-redis-${jobDockerId}`;
+		await $`docker stop sandbox-redis-${jobDockerId}`.quiet();
 		console.log(`Stopped container sandbox-redis-${jobDockerId}`);
 	} catch (e: any) {
 		if (e.stderr && !e.stderr.includes('No such container')) {
@@ -60,6 +60,13 @@ export const destroySandbox = async (jobDockerId: string) => {
 		} else if (!e.stderr) {
 			console.error(`Could not stop container sandbox-redis-${jobDockerId}.`, e);
 		}
+	}
+
+	try {
+		await Bun.file(`${import.meta.dir}/Dockerfile.temp`).delete();
+		console.log('\x1b[36m%s\x1b[0m', 'Deleted Dockerfile.temp successfully');
+	} catch (e: any) {
+		console.error(`Could not delete Dockerfile.temp`);
 	}
 
 	console.log(`Sandbox for job ${jobDockerId} destroyed.`);

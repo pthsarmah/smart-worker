@@ -2,6 +2,7 @@ import type { Job } from "bullmq";
 import fs from "fs/promises";
 import type { CodeChange } from "./types";
 import { spinUpSandboxAndRunAICodeChanges } from "./sandbox";
+import { startSpinner } from "../utils";
 
 const NODE_STACK_PATH_RE =
 	/\(?((?:[A-Za-z]:\\|\/)?[^():\n]+\.(?:js|ts|mjs|cjs)):\d+:\d+\)?/g;
@@ -99,6 +100,8 @@ STRICT OUTPUT RULES:
 		}
 	];
 
+	const stopSpinner = startSpinner();
+
 	const response = await fetch("http://localhost:8080/v1/chat/completions", {
 		method: "POST",
 		headers: {
@@ -109,6 +112,8 @@ STRICT OUTPUT RULES:
 			messages: messages,
 		}),
 	});
+
+	stopSpinner();
 
 	const responseJson: any = await response.json();
 	const reasonText = JSON.stringify(responseJson["choices"][0]["message"]["content"]);
@@ -126,12 +131,9 @@ STRICT OUTPUT RULES:
 			.replace(/\\"/g, '"')   // Unescape quotes
 			.replace(/"$/, '');     // Remove potential trailing quote from JSON.stringify
 
-		console.log(`
-=============
-FILE: ${filePath}
-=============`);
+		console.log("\x1b[36m%s\x1b[0m", "> File path extracted: ", filePath);
+		console.log("\x1b[36m%s\x1b[0m", "> Code cleansed");
 
-		console.log(cleanCode.trim());
 		codeChanges.push({
 			path: filePath,
 			code: cleanCode.trim(),
@@ -139,6 +141,7 @@ FILE: ${filePath}
 	}
 
 	if (codeChanges.length > 0) {
+		console.log("\x1b[36m%s\x1b[0m", "> Fix sent! Testing in Docker sandbox...");
 		spinUpSandboxAndRunAICodeChanges(job, codeChanges);
 	}
 };

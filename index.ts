@@ -8,7 +8,6 @@ app.use(express.json());
 const port = parseInt(process.env.PORT || '9090');
 
 app.get("/", async (_, res) => {
-	console.log('hh', process.env.REDIS_HOST, process.env.REDIS_PORT)
 	const job = await loginQueue.add('start-worker', { num: 10, callfile: import.meta.path });
 	res.status(202).json({
 		jobId: job.id,
