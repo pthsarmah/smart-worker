@@ -101,44 +101,53 @@ STRICT OUTPUT RULES:
 	];
 
 	const stopSpinner = startSpinner();
+	let response;
 
-	const response = await fetch("http://localhost:8080/v1/chat/completions", {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/json"
-		},
-		body: JSON.stringify({
-			model: "qwen2.5-coder-3b-instruct-q4_k_m.gguf",
-			messages: messages,
-		}),
-	});
+	try {
+		response = await fetch("http://localhost:8080/v1/chat/completions", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json"
+			},
+			body: JSON.stringify({
+				model: "qwen2.5-coder-3b-instruct-q4_k_m.gguf",
+				messages: messages,
+			}),
+		});
+	}
+	catch (e: any) {
+		console.error('Error connecting with LLM!');
+		stopSpinner();
+		return;
+	}
 
 	stopSpinner();
 
 	const responseJson: any = await response.json();
 	const reasonText = JSON.stringify(responseJson["choices"][0]["message"]["content"]);
+	const rootDir = process.env.ROOT_DIR!;
 
-	let codeChanges: CodeChange[] = [];
+	const codeChanges = await Promise.all(
+		Array.from(reasonText.matchAll(TS_CAPTURE_REGEX)).map(async (match) => {
+			const filePath = (match[1] as string).trim();
+			const rawCode = match[2] as string;
 
-	for (const match of reasonText.matchAll(TS_CAPTURE_REGEX)) {
-		const rawPath = match[1] as string;
-		const rawCode = match[2] as string;
+			const absolutePath = filePath.replace(rootDir, "");
+			const orgCodePromise = Bun.file(absolutePath).text();
 
-		const filePath = rawPath.trim();
-		const cleanCode = rawCode
-			.replace(/\\n/g, '\n')  // Unescape newlines
-			.replace(/\\t/g, '\t')
-			.replace(/\\"/g, '"')   // Unescape quotes
-			.replace(/"$/, '');     // Remove potential trailing quote from JSON.stringify
+			const cleanCode = rawCode.replace(/\\([nt"])/g, (_, char) => {
+				if (char === 'n') return '\n';
+				if (char === 't') return '\t';
+				return '"';
+			}).replace(/"$/, '');
 
-		console.log("\x1b[36m%s\x1b[0m", "> File path extracted: ", filePath);
-		console.log("\x1b[36m%s\x1b[0m", "> Code cleansed");
-
-		codeChanges.push({
-			path: filePath,
-			code: cleanCode.trim(),
-		});
-	}
+			return {
+				path: filePath,
+				originalCode: await orgCodePromise, // Resolved in parallel
+				code: cleanCode.trim(),
+			};
+		})
+	);
 
 	if (codeChanges.length > 0) {
 		console.log("\x1b[36m%s\x1b[0m", "> Fix sent! Testing in Docker sandbox...");

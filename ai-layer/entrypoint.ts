@@ -1,6 +1,6 @@
 import { $ } from "bun";
 
-const ROOT_DIR = '/home/crankshaft/Projects/jobsys/';
+const ROOT_DIR = process.env.ROOT_DIR!;
 
 console.log("Sandbox entrypoint started.");
 

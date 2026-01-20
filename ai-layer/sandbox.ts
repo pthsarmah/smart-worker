@@ -3,6 +3,8 @@ import type { CodeChange } from './types';
 import { runFailedJob } from './run-job';
 import type { Job } from 'bullmq';
 import { destroySandbox } from './destroy-sandbox';
+import { EmailClient } from '../email';
+import { getDiffHTML } from '../utils';
 
 var ROOT_DIRECTORY = './';
 
@@ -85,6 +87,15 @@ export const spinUpSandboxAndRunAICodeChanges = async (job: Job, codeChanges: Co
 		if (result.success) {
 			console.log("\x1b[36m%s\x1b[0m", `>> Job ${job.id} ran successfully in sandbox.`);
 			console.log("\x1b[36m%s\x1b[0m", `>> Email sent with proposed changes`);
+
+			const html = codeChanges.map(c => {
+				const codeHtml = getDiffHTML(JSON.stringify(c.originalCode), JSON.stringify(c.code));
+				const str = `<b>Path</b>: ${c.path}<br><br>
+										 <b>Code</b>: <br><br><code>${codeHtml}</code><br><br>==========================`
+				return str;
+			}).join("<br><br>");
+
+			EmailClient.Instance.sendSuccessEmail(html);
 		}
 		else {
 			console.error(`Job ${job.id} failed in sandbox.`);

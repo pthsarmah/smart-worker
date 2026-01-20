@@ -6,8 +6,13 @@ export const runFailedJob = async (
 ): Promise<{ success: boolean; result: any }> => {
 	for (let i = 0; i < 5; i++) {
 		try {
-			const response = await fetch(`http://localhost:${port}`, {
-				method: "GET",
+			const response = await fetch(`http://localhost:${port}/job`, {
+				method: "POST",
+				body: JSON.stringify({
+					name: job.name,
+					data: job.data,
+				}),
+				headers: { "Content-Type": "application/json" }
 			});
 
 			if (response.ok) {

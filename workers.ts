@@ -20,7 +20,10 @@ loginWorker.on('failed', async (job) => {
 	if (job && attemptsMade >= maxAttempts) {
 		if (job.id) loginQueue.remove(job.id);
 		loginDLQ.add(job.name, job.data, job.opts);
-		jobFailureReasoning(job).then(() => { }).catch((e) => console.error(e));
+		if (job.data.reasoning_fix)
+			jobFailureReasoning(job).then(() => { }).catch((e) => console.error(e));
+		else
+			console.error(`Job ${job.id} failed again!`);
 	}
 });
 

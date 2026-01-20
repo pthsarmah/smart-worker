@@ -5,14 +5,18 @@
   "private": true,
   "devDependencies": {
     "@types/bun": "latest",
-    "@types/express": "^5.0.6"
+    "@types/diff": "^8.0.0",
+    "@types/express": "^5.0.6",
+    "@types/nodemailer": "^7.0.5"
   },
   "peerDependencies": {
     "typescript": "^5"
   },
   "dependencies": {
     "bullmq": "^5.66.5",
+    "diff": "^8.0.3",
     "express": "^5.2.1",
-    "ioredis": "^5.9.1"
+    "ioredis": "^5.9.1",
+    "nodemailer": "^7.0.12"
   }
 }
