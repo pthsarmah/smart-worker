@@ -125,7 +125,12 @@ STRICT OUTPUT RULES:
 
 	const responseJson: any = await response.json();
 	const reasonText = JSON.stringify(responseJson["choices"][0]["message"]["content"]);
-	const rootDir = process.env.ROOT_DIR!;
+	const rootDir = process.env.ROOT_DIR;
+
+	if (!rootDir) {
+		console.log("No root directory found!");
+		return;
+	}
 
 	const codeChanges = await Promise.all(
 		Array.from(reasonText.matchAll(TS_CAPTURE_REGEX)).map(async (match) => {

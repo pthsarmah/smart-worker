@@ -5,7 +5,13 @@ import "./workers";
 
 const app = express();
 app.use(express.json());
-const port = parseInt(process.env.PORT!);
+
+const portStr = process.env.PORT;
+let port: number;
+
+if (!portStr) {
+	port = 9090
+} else port = parseInt(portStr);
 
 app.get("/", async (_, res) => {
 	const job = await loginQueue.add('start-worker', { num: 10, callfile: import.meta.path, reasoning_fix: true });
