@@ -60,6 +60,7 @@ export const runDockerContainer = async (jobName: string, codeChanges: CodeChang
 	const codeChangesJSON = JSON.stringify(codeChanges);
 
 	const result = await $`docker run -d --rm --memory=128m --network=sandbox --cpus=0.5 --name=bun-sandbox-${jobName} --pids-limit=64 -p ${sandboxPort}:${sandboxPort} -e CODE_CHANGES=${codeChangesJSON} bun-sandbox`;
+
 	console.log(`Started container with ID: ${result.stdout.toString().trim()}`);
 }
 

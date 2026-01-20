@@ -5,7 +5,9 @@ import "./workers";
 
 const app = express();
 app.use(express.json());
-const port = parseInt(process.env.PORT || '9090');
+const port = parseInt(process.env.PORT!);
+
+console.log(port);
 
 app.get("/", async (_, res) => {
 	const job = await loginQueue.add('start-worker', { num: 10, callfile: import.meta.path, reasoning_fix: true });
@@ -17,7 +19,7 @@ app.get("/", async (_, res) => {
 
 app.post("/job", async (req, res) => {
 	const { name, data } = req.body;
-	console.log(name, data);
+	console.log(process.env.PORT!)
 	if (!name || !data) {
 		return res.status(400).json({ error: "Missing name or data" });
 	}
