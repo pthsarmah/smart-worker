@@ -26,7 +26,20 @@ export class EmailClient {
 			await this.transporter.sendMail({
 				from: process.env.SMTP_USER,
 				to: process.env.SMTP_TO_USER,
-				subject: "[ SMARTJOB ] - Failed job ran successfully with these changes!",
+				subject: "[ ✅ SUCCESS @ SmartWorker ] - Failed job ran successfully with these changes!",
+				html: html,
+			});
+		} catch (e: any) {
+			console.log("Error sending email: ", e);
+		}
+	};
+
+	sendFailedEmail = async (html: string) => {
+		try {
+			await this.transporter.sendMail({
+				from: process.env.SMTP_USER,
+				to: process.env.SMTP_TO_USER,
+				subject: "[ ❌ FAILURE @ SmartWorker ] - Failed job could not run successfully with these changes!",
 				html: html,
 			});
 		} catch (e: any) {

@@ -91,8 +91,8 @@ export const spinUpSandboxAndRunAICodeChanges = async (job: Job, codeChanges: Co
 
 			const html = codeChanges.map(c => {
 				const codeHtml = getDiffHTML(JSON.stringify(c.originalCode), JSON.stringify(c.code));
-				const str = `<b>Path</b>: ${c.path}<br><br>
-										 <b>Code</b>: <br><br><code>${codeHtml}</code><br><br>==========================`
+				const str = `<b>🔍 Path</b>: ${c.path}<br>
+										 <b>🧑‍💻 Code</b>: <br><br><code>${codeHtml}</code><br>`
 				return str;
 			}).join("<br><br>");
 
