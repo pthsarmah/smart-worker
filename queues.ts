@@ -37,7 +37,11 @@ export const loginDLQ = new Queue('login-dlq', {
 
 export const loginQueueEvents = new QueueEvents("login", {
 	connection: {
-		host: process.env.REDIS_HOST || "localhost",
-		port: parseInt(process.env.REDIS_PORT || "6379"),
+		host: process.env.APP_REDIS_HOST || "localhost",
+		port: parseInt(process.env.APP_REDIS_PORT || "6379"),
 	},
 });
+
+export const queueMap: Record<string, Queue> = {
+	"login": loginQueue,
+}

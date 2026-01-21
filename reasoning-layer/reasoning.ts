@@ -3,6 +3,7 @@ import fs from "fs/promises";
 import type { CodeChange } from "./types";
 import { spinUpSandboxAndRunAICodeChanges } from "./sandbox";
 import { startSpinner } from "../utils";
+import { storeJobToMemory } from "../memory-layer/memory";
 
 const NODE_STACK_PATH_RE =
 	/\(?((?:[A-Za-z]:\\|\/)?[^():\n]+\.(?:js|ts|mjs|cjs)):\d+:\d+\)?/g;
@@ -100,11 +101,11 @@ STRICT OUTPUT RULES:
 		}
 	];
 
-	const stopSpinner = startSpinner();
+	const stopSpinner = startSpinner(" Sending code to LLM for fix...");
 	let response;
 
 	try {
-		response = await fetch("http://localhost:8080/v1/chat/completions", {
+		response = await fetch("http://localhost:8100/v1/chat/completions", {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json"
@@ -125,7 +126,7 @@ STRICT OUTPUT RULES:
 
 	const responseJson: any = await response.json();
 	const reasonText = JSON.stringify(responseJson["choices"][0]["message"]["content"]);
-	const rootDir = process.env.ROOT_DIR;
+	const rootDir = process.env.APP_ROOT_DIR;
 
 	if (!rootDir) {
 		console.log("No root directory found!");
@@ -153,6 +154,9 @@ STRICT OUTPUT RULES:
 			};
 		})
 	);
+
+	console.log("\x1b[33m%s\x1b[0m", "> Storing failed job to memory...");
+	storeJobToMemory(job, codeChanges.map(c => ({ path: c.path, code: c.originalCode })));
 
 	if (codeChanges.length > 0) {
 		console.log("\x1b[36m%s\x1b[0m", "> Fix sent! Testing in Docker sandbox...");

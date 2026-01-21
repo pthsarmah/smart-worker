@@ -1,6 +1,6 @@
 import { Worker } from "bullmq";
 import { connection } from "./redis";
-import { jobFailureReasoning } from "./ai-layer/reasoning";
+import { jobFailureReasoning } from "./reasoning-layer/reasoning";
 import { loginDLQ, loginQueue } from "./queues";
 
 const loginWorker = new Worker('login', async job => {

@@ -19,7 +19,7 @@ USER sandbox
 COPY --chown=sandbox:sandbox ${ROOT_DIRECTORY} .
 ENV PORT=${sPort}
 EXPOSE ${sPort}/tcp
-CMD ["sh", "-c", "redis-server --daemonize no & exec bun run ai-layer/entrypoint.ts"]
+CMD ["sh", "-c", "redis-server --daemonize no --port 6800 & exec bun run reasoning-layer/entrypoint.ts"]
 `
 }
 
@@ -59,7 +59,7 @@ export const runDockerContainer = async (jobName: string, codeChanges: CodeChang
 	console.log("\x1b[34m%s\x1b[0m", "> Testing code changes...");
 	const codeChangesJSON = JSON.stringify(codeChanges);
 
-	const result = await $`docker run -d --rm --memory=128m --network=sandbox --cpus=0.5 --name=bun-sandbox-${jobName} --pids-limit=64 -p ${sandboxPort}:${sandboxPort} -e CODE_CHANGES=${codeChangesJSON} bun-sandbox`;
+	const result = await $`docker run -d --rm --memory=128m --network=sandbox --cpus=0.5 --name=bun-sandbox-${jobName} --pids-limit=64 -p ${sandboxPort}:${sandboxPort} -e APP_CODE_CHANGES=${codeChangesJSON} -e APP_REDIS_PORT=6800 -e APP_PORT=${sandboxPort} bun-sandbox`;
 
 	console.log(`Started container with ID: ${result.stdout.toString().trim()}`);
 }

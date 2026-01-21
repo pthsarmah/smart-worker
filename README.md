@@ -27,7 +27,7 @@ This project is a robust job processing system built with Bun, TypeScript, and B
 
 ```
 .
-├── ai-layer/
+├── reasoning-layer/
 │   ├── destroy-sandbox.ts  # Functions to clean up Docker containers
 │   ├── entrypoint.ts       # Entrypoint for the Docker sandbox
 │   ├── reasoning.ts        # Handles interaction with the LLM
@@ -79,15 +79,15 @@ This project is a robust job processing system built with Bun, TypeScript, and B
 Create a `.env` file in the root of the project with the following environment variables:
 
 ```
-PORT=9090
-REDIS_HOST=localhost
-REDIS_PORT=6379
-SMTP_HOST=your_smtp_host
-SMTP_PORT=your_smtp_port
-SMTP_USER=your_smtp_user
-SMTP_PASS=your_smtp_password
-SMTP_TO_USER=recipient_email
-ROOT_DIR=$(pwd)
+APP_PORT=9090
+APP_REDIS_HOST=localhost
+APP_REDIS_PORT=6800
+APP_SMTP_HOST=your_smtp_host
+APP_SMTP_PORT=your_smtp_port
+APP_SMTP_USER=your_smtp_user
+APP_SMTP_PASS=your_smtp_password
+APP_SMTP_TO_USER=recipient_email
+APP_ROOT_DIR=$(pwd)
 ```
 
 **Note on `ROOT_DIR`**: This is used by the sandboxing environment to correctly mount and locate files.

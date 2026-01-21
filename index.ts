@@ -1,12 +1,12 @@
 import express from "express";
 import { loginQueue, loginQueueEvents } from "./queues";
-import "./ai-layer/destroy-sandbox.ts"
+import "./reasoning-layer/destroy-sandbox.ts"
 import "./workers";
 
 const app = express();
 app.use(express.json());
 
-const portStr = process.env.PORT;
+const portStr = process.env.APP_PORT;
 let port: number;
 
 if (!portStr) {

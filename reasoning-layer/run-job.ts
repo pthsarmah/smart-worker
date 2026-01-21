@@ -19,7 +19,7 @@ export const runFailedJob = async (
 				const result = await response.json();
 				return { success: true, result: result };
 			}
-			console.log(`Attempt ${i + 1} failed: ${response.statusText}`);
+			console.log(`Attempt ${i + 1} failed: ${response.text}`);
 		} catch (error: any) {
 			console.log(`Attempt ${i + 1} failed: ${error.message}`);
 		}

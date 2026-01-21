@@ -16,18 +16,18 @@ export class EmailClient {
 
 	constructor() {
 
-		this.smtpUser = process.env.SMTP_USER;
-		this.smtpPass = process.env.SMTP_PASS;
-		this.smtpHost = process.env.SMTP_HOST;
-		this.smtpToUser = process.env.SMTP_TO_USER;
+		this.smtpUser = process.env.APP_SMTP_USER;
+		this.smtpPass = process.env.APP_SMTP_PASS;
+		this.smtpHost = process.env.APP_SMTP_HOST;
+		this.smtpToUser = process.env.APP_SMTP_TO_USER;
 
 		if (!this.smtpHost || !this.smtpUser || !this.smtpPass || !this.smtpToUser) {
-			console.error("SMTP environment variables invalid!");
+			console.error("SMTP env.APP_ronment variables invalid!");
 		}
 
 		this.transporter = nodemailer.createTransport({
 			host: this.smtpHost,
-			port: parseInt(process.env.SMTP_PORT!),
+			port: parseInt(process.env.APP_SMTP_PORT!),
 			secure: true,
 			auth: {
 				user: this.smtpUser,

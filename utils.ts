@@ -1,7 +1,7 @@
 import { stdout } from "process"
 import * as Diff from 'diff';
 
-export function startSpinner() {
+export function startSpinner(loadingText: string) {
 	const characters = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 	const cursorEsc = {
 		hide: '\u001B[?25l',
@@ -11,7 +11,7 @@ export function startSpinner() {
 
 	let i = 0;
 	const timer = setInterval(function() {
-		stdout.write("\r" + "\x1b[33m" + characters[i++] + " Sending code to LLM for fix...");
+		stdout.write("\r" + "\x1b[33m" + characters[i++] + loadingText);
 		i = i >= characters.length ? 0 : i;
 	}, 150);
 

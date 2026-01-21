@@ -2,8 +2,8 @@ import { $ } from "bun";
 
 console.log("Sandbox entrypoint started.");
 
-const rootDirectory = process.env.ROOT_DIR;
-const codeChangesEnv = process.env.CODE_CHANGES;
+const rootDirectory = process.env.APP_ROOT_DIR;
+const codeChangesEnv = process.env.APP_CODE_CHANGES;
 
 if (!rootDirectory) {
 	console.error("No root directory found in environment variables!");
