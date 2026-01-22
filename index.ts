@@ -2,6 +2,7 @@ import express from "express";
 import { loginQueue, loginQueueEvents } from "./queues";
 import "./reasoning-layer/destroy-sandbox.ts"
 import "./workers";
+import "./sql";
 
 const app = express();
 app.use(express.json());

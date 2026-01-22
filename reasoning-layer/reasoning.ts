@@ -29,7 +29,8 @@ export async function getStacktracePathsCodeContext(job: Job) {
 	const filePaths = getFilePaths(job.stacktrace[0] as string);
 	filePaths.push(job.data.callfile);
 
-	let codeContext = `
+	let codeContext: string = '';
+	let jobContext = `
 ==================
 JOB METADATA
 ==================
@@ -67,12 +68,13 @@ ERROR: Could not read file (${err.message})
 		}
 	}
 
-	return codeContext;
+	return { jobContext, codeContext };
 }
 
 export const jobFailureReasoning = async (job: Job) => {
 
-	const prompt = await getStacktracePathsCodeContext(job);
+	const { jobContext, codeContext } = await getStacktracePathsCodeContext(job);
+	const prompt = jobContext + "" + codeContext;
 	const messages = [
 		{
 			role: "system",
@@ -155,11 +157,10 @@ STRICT OUTPUT RULES:
 		})
 	);
 
-	console.log("\x1b[33m%s\x1b[0m", "> Storing failed job to memory...");
-	storeJobToMemory(job, codeChanges.map(c => ({ path: c.path, code: c.originalCode })));
-
 	if (codeChanges.length > 0) {
 		console.log("\x1b[36m%s\x1b[0m", "> Fix sent! Testing in Docker sandbox...");
-		spinUpSandboxAndRunAICodeChanges(job, codeChanges);
+		const result = await spinUpSandboxAndRunAICodeChanges(job, codeChanges);
+		if (result)
+			await storeJobToMemory(job, codeContext);
 	}
 };

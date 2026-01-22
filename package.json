@@ -7,7 +7,8 @@
     "@types/bun": "latest",
     "@types/diff": "^8.0.0",
     "@types/express": "^5.0.6",
-    "@types/nodemailer": "^7.0.5"
+    "@types/nodemailer": "^7.0.5",
+    "@types/pg": "^8.16.0"
   },
   "peerDependencies": {
     "typescript": "^5"
@@ -17,6 +18,7 @@
     "diff": "^8.0.3",
     "express": "^5.2.1",
     "ioredis": "^5.9.1",
-    "nodemailer": "^7.0.12"
+    "nodemailer": "^7.0.12",
+    "pg": "^8.17.2"
   }
 }

@@ -1,6 +1,9 @@
 # dependencies (bun install)
 node_modules
 
+#third party
+vendor/
+
 # output
 out
 dist

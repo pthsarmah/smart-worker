@@ -59,7 +59,7 @@ export const runDockerContainer = async (jobName: string, codeChanges: CodeChang
 	console.log("\x1b[34m%s\x1b[0m", "> Testing code changes...");
 	const codeChangesJSON = JSON.stringify(codeChanges);
 
-	const result = await $`docker run -d --rm --memory=128m --network=sandbox --cpus=0.5 --name=bun-sandbox-${jobName} --pids-limit=64 -p ${sandboxPort}:${sandboxPort} -e APP_CODE_CHANGES=${codeChangesJSON} -e APP_REDIS_PORT=6800 -e APP_PORT=${sandboxPort} bun-sandbox`;
+	const result = await $`docker run -d --rm --memory=128m --network=sandbox --cpus=0.5 --name=bun-sandbox-${jobName} --pids-limit=64 -p ${sandboxPort}:${sandboxPort} -e APP_CODE_CHANGES=${codeChangesJSON} -e EXECUTION_CONTEXT=sandbox -e APP_REDIS_PORT=6800 -e APP_PORT=${sandboxPort} bun-sandbox`;
 
 	console.log(`Started container with ID: ${result.stdout.toString().trim()}`);
 }
@@ -70,6 +70,8 @@ export const spinUpSandboxAndRunAICodeChanges = async (job: Job, codeChanges: Co
 
 	const dockerfileContent = initPorts(sPort.toString());
 	const jobDockerId = `${job.name}-one`;
+
+	let res = false;
 
 	try {
 		console.log("\x1b[34m%s\x1b[0m", `> Preparing sandbox for job ${job.id}`);
@@ -97,13 +99,17 @@ export const spinUpSandboxAndRunAICodeChanges = async (job: Job, codeChanges: Co
 			}).join("<br><br>");
 
 			EmailClient.Instance.sendSuccessEmail(html);
+			res = true;
 		}
 		else {
 			console.error(`Job ${job.id} failed in sandbox.`);
+			res = false;
 		}
 	} catch (error) {
+		res = false;
 		console.error(`An error occurred in sandbox for job ${job.id}:`, error);
 	} finally {
 		await destroySandbox(jobDockerId);
+		return res;
 	}
 }
