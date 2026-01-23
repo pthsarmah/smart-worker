@@ -1,6 +1,6 @@
 import type { Job, Queue } from "bullmq";
 import { queueMap } from "../queues";
-import { insertFailedJobAndChunkedEmbeddings } from "../sql";
+import { getTopKEmbeddings, insertFailedJobAndChunkedEmbeddings } from "../sql";
 import { startSpinner } from "../utils";
 import type { ChunkedEmbedding } from "../reasoning-layer/types";
 
@@ -60,7 +60,7 @@ const chunkText = (text: string, maxChars = 800, overlap = 200) => {
 	return chunks;
 }
 
-const generateEmbeddings = async (jobId: string, text: string) => {
+const generateEmbeddings = async (text: string) => {
 
 	const chunks = chunkText(text);
 	let allEmbeddings: ChunkedEmbedding[] = [];
@@ -93,9 +93,7 @@ const generateEmbeddings = async (jobId: string, text: string) => {
 	return allEmbeddings;
 }
 
-export const storeJobToMemory = async (job: Job, codeContext: string, resolved: boolean, resolutionSummary: string) => {
-
-	const stopSpinner = startSpinner("Storing failed job in memory...");
+export const createEmbeddingText = async (job: Job, codeContext: string) => {
 
 	const jobMetadata = await extractJobMetadata(job);
 	const env = extractEnvironmentMetadata();
@@ -121,7 +119,21 @@ export const storeJobToMemory = async (job: Job, codeContext: string, resolved: 
 \n${Object.entries(env).map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v, null, 2) : v}`).join("\n")}\n
 `;
 
-	const embeddings = await generateEmbeddings(job.id!, embeddingText);
+	return embeddingText;
+}
+
+export const searchJobFromMemory = async (context: string) => {
+	const embeddings = await generateEmbeddings(context);
+	const final = await getTopKEmbeddings(embeddings, 15);
+	return final;
+}
+
+export const storeJobToMemory = async (job: Job, codeContext: string, resolved: boolean, resolutionSummary: string) => {
+
+	const stopSpinner = startSpinner("Storing failed job in memory...");
+
+	const embeddingText = await createEmbeddingText(job, codeContext);
+	const embeddings = await generateEmbeddings(embeddingText);
 
 	await insertFailedJobAndChunkedEmbeddings(job, resolved, resolutionSummary, embeddings);
 

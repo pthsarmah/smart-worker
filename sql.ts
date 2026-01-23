@@ -54,6 +54,35 @@ const createBaseTables = () => {
 		.catch(e => console.log("Error creating tables", e));
 }
 
+export const getTopKEmbeddings = async (embeddings: ChunkedEmbedding[], k: number = 5) => {
+
+	const allRes = [];
+	for (const emb of embeddings) {
+		const res = await dbPool.query(
+			`
+		SELECT id, content, embedding <=> $1 as distance FROM job_failure_chunks ORDER BY distance LIMIT $2
+		`,
+			[`[${emb.embedding.join(",")}]`, k]
+		);
+		allRes.push(...res.rows)
+	}
+
+	const best = new Map();
+
+	for (const row of allRes) {
+		const prev = best.get(row.id);
+		if (!prev || row.distance < prev.distance) {
+			best.set(row.id, row);
+		}
+	}
+
+	const final = [...best.values()]
+		.sort((a, b) => a.distance - b.distance)
+		.slice(0, k);
+
+	return final;
+}
+
 export const insertFailedJobAndChunkedEmbeddings = async (job: Job, resolved: boolean = false, resolutionSummary: string = "", embeddings: ChunkedEmbedding[]) => {
 
 	dbPool.query(

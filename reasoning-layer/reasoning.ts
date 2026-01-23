@@ -3,7 +3,7 @@ import fs from "fs/promises";
 import type { CodeChange } from "./types";
 import { spinUpSandboxAndRunAICodeChanges } from "./sandbox";
 import { startSpinner } from "../utils";
-import { storeJobToMemory } from "../memory-layer/memory";
+import { searchJobFromMemory, storeJobToMemory } from "../memory-layer/memory";
 
 const NODE_STACK_PATH_RE =
 	/\(?((?:[A-Za-z]:\\|\/)?[^():\n]+\.(?:js|ts|mjs|cjs)):\d+:\d+\)?/g;
@@ -242,6 +242,16 @@ ${fixedCode}
 	}
 
 	if (codeChanges.length > 0) {
+		const stopSpinner = startSpinner("Searching vector DB for similar jobs...");
+		const search = await searchJobFromMemory(codeContext);
+		stopSpinner();
+
+		if (search) {
+			console.log("\x1b[36m%s\x1b[0m", "> Similarities found!");
+		}
+
+		return;
+
 		console.log("\x1b[36m%s\x1b[0m", "> Fix sent! Testing in Docker sandbox...");
 		const result = await spinUpSandboxAndRunAICodeChanges(job, codeChanges);
 		if (result) {
