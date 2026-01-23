@@ -3,3 +3,9 @@ export interface CodeChange {
 	code: string;
 	originalCode: string;
 };
+
+export type ChunkedEmbedding = {
+	chunkId: number;
+	content: string;
+	embedding: any[],
+}

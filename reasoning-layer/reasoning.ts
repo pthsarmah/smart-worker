@@ -71,6 +71,71 @@ ERROR: Could not read file (${err.message})
 	return { jobContext, codeContext };
 }
 
+const generateResolutionSummary = async (fixPrompt: string) => {
+
+	const messages = [
+		{
+			role: "system",
+			content: `
+You are a senior software engineer.
+
+Your task is to write a **concise resolution summary** explaining how the job failure was fixed.
+
+STRICT OUTPUT RULES:
+1. **CONTENT:**
+   - Explain the **root cause** of the failure.
+   - Explain the **specific fix applied**.
+   - Focus on logic and behavior, not formatting or instructions.
+
+2. **FORMAT:**
+   - Output a **single short paragraph only**.
+   - No bullet points, no headings, no markdown.
+   - No code.
+
+3. **STYLE:**
+   - Technical, clear, production-quality.
+   - No references to prompts, instructions, or tooling.
+   - Write as if for an incident or change log.
+
+Input: Original code and fixed code.  
+Output: One short resolution summary paragraph.
+        `.trim(),
+		},
+		{
+			role: "user",
+			content: JSON.stringify(fixPrompt),
+		}
+	];
+
+
+	const stopSpinner = startSpinner("Generating resolution summary...");
+	let response;
+
+	try {
+		response = await fetch("http://localhost:8100/v1/chat/completions", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json"
+			},
+			body: JSON.stringify({
+				model: "qwen2.5-coder-3b-instruct-q4_k_m.gguf",
+				messages: messages,
+			}),
+		});
+	}
+	catch (e: any) {
+		console.error('Error connecting with LLM!');
+		stopSpinner();
+		return;
+	}
+
+	stopSpinner();
+
+	const responseJson: any = await response.json();
+	const reasonText = JSON.stringify(responseJson["choices"][0]["message"]["content"]);
+	return reasonText;
+}
+
 export const jobFailureReasoning = async (job: Job) => {
 
 	const { jobContext, codeContext } = await getStacktracePathsCodeContext(job);
@@ -103,7 +168,7 @@ STRICT OUTPUT RULES:
 		}
 	];
 
-	const stopSpinner = startSpinner(" Sending code to LLM for fix...");
+	const stopSpinner = startSpinner("Sending code to LLM for fix...");
 	let response;
 
 	try {
@@ -151,16 +216,39 @@ STRICT OUTPUT RULES:
 
 			return {
 				path: filePath,
-				originalCode: await orgCodePromise, // Resolved in parallel
+				originalCode: await orgCodePromise,
 				code: cleanCode.trim(),
 			};
 		})
 	);
 
+	let codeChangesContext = "";
+	for (let i = 0; i < codeChanges.length; i++) {
+		const path = codeChanges[i]?.path as string;
+		const originalCode = codeChanges[i]?.originalCode as string;
+		const fixedCode = codeChanges[i]?.code as string;
+
+		codeChangesContext += `FILE ${i + 1}: ${path}
+ORIGINAL CODE IN FILE ${i + 1}:
+\`\`\`
+${originalCode}
+\`\`\`
+
+FIXED CODE IN FILE ${i + 1}:
+\`\`\`
+${fixedCode}
+\`\`\`
+`;
+	}
+
 	if (codeChanges.length > 0) {
 		console.log("\x1b[36m%s\x1b[0m", "> Fix sent! Testing in Docker sandbox...");
 		const result = await spinUpSandboxAndRunAICodeChanges(job, codeChanges);
-		if (result)
-			await storeJobToMemory(job, codeContext);
+		if (result) {
+			const fixPrompt = jobContext + codeChangesContext;
+			const summary = await generateResolutionSummary(fixPrompt);
+			console.log("SUMMARY: \n\n", summary);
+			storeJobToMemory(job, codeContext, result, summary as string);
+		}
 	}
 };

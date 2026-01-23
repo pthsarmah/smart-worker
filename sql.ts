@@ -1,5 +1,6 @@
 import type { Job } from 'bullmq';
 import { Pool } from 'pg';
+import type { ChunkedEmbedding } from './reasoning-layer/types';
 
 const dbPool = new Pool({
 	host: process.env.APP_DB_HOST!,
@@ -14,7 +15,7 @@ const dbPool = new Pool({
 });
 
 const createBaseTables = () => {
-	dbPool.query(`CREATE TABLE IF NOT EXISTS job_failures (
+	dbPool.query(`CREATE TABLE IF NOT EXISTS job_failures_metadata (
     id BIGSERIAL PRIMARY KEY,
     job_id TEXT NOT NULL,
     job_name TEXT NOT NULL,
@@ -28,7 +29,6 @@ const createBaseTables = () => {
     retry_delay_ms INTEGER,
     timestamp_created TIMESTAMPTZ NOT NULL,
     timestamp_failed  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    embedding VECTOR(1536),
     resolved BOOLEAN DEFAULT false,
     resolved_at TIMESTAMPTZ,
     resolution_summary TEXT,
@@ -37,18 +37,27 @@ const createBaseTables = () => {
 	);`)
 		.catch(e => console.log("Error creating tables", e));
 
+	dbPool.query(`CREATE TABLE IF NOT EXISTS job_failure_chunks (
+    id BIGSERIAL PRIMARY KEY,
+    job_failure_id BIGINT NOT NULL REFERENCES job_failures_metadata(id) ON DELETE CASCADE,
+    chunk_index INTEGER NOT NULL,
+    content TEXT NOT NULL,
+    embedding VECTOR(384) NOT NULL
+	);`)
+		.catch(e => console.log("Error creating tables", e));
+
 	dbPool.query(`
-		CREATE INDEX IF NOT EXISTS idx_job_failures_lookup ON job_failures (queue_name, job_id);
-		CREATE INDEX IF NOT EXISTS idx_job_failures_failed_time ON job_failures (timestamp_failed DESC);
-		CREATE INDEX IF NOT EXISTS idx_job_failures_unresolved ON job_failures (resolved) WHERE resolved = false;
+		CREATE INDEX IF NOT EXISTS idx_job_failures_metadata_lookup ON job_failures_metadata (queue_name, job_id);
+		CREATE INDEX IF NOT EXISTS idx_job_failures_metadata_failed_time ON job_failures_metadata (timestamp_failed DESC);
+		CREATE INDEX IF NOT EXISTS idx_job_failures_metadata_unresolved ON job_failures_metadata (resolved) WHERE resolved = false;
 	`)
 		.catch(e => console.log("Error creating tables", e));
 }
 
-export const insertFailedJob = async (job: Job) => {
+export const insertFailedJobAndChunkedEmbeddings = async (job: Job, resolved: boolean = false, resolutionSummary: string = "", embeddings: ChunkedEmbedding[]) => {
 
 	dbPool.query(
-		`INSERT INTO job_failures (
+		`INSERT INTO job_failures_metadata (
       job_id,
       job_name,
       queue_name,
@@ -59,11 +68,14 @@ export const insertFailedJob = async (job: Job) => {
       attempts_made,
       max_attempts,
       retry_delay_ms,
-      timestamp_created
+      timestamp_created,
+			resolved,
+			resolution_summary
    ) VALUES (
       $1, $2, $3, $4, $5,
-      $6, $7, $8, $9, $10, $11
-   )`,
+      $6, $7, $8, $9, $10, $11,
+			$12, $13
+   ) RETURNING id`,
 		[
 			String(job.id),
 			job.name,
@@ -71,14 +83,35 @@ export const insertFailedJob = async (job: Job) => {
 			job.data ?? null,
 			job.opts ?? null,
 			job.failedReason ?? null,
-			Array.isArray(job.stacktrace) ? job.stacktrace.at(-1) : null,
+			Array.isArray(job.stacktrace) ? JSON.stringify(job.stacktrace.at(-1)) : null,
 			job.attemptsMade ?? 0,
 			job.opts?.attempts ?? null,
 			job.opts?.delay ?? null,
-			new Date(job.timestamp)
+			new Date(job.timestamp),
+			resolved,
+			resolutionSummary,
 		]
-	).catch(e => console.error("Error inserting job: ", e));
+	)
+		.then(s => {
+			let jobFailureId = parseInt(s.rows[0].id);
+			for (let i = 0; i < embeddings.length; i++) {
+				const emb = embeddings[i];
+				dbPool.query(
+					`INSERT INTO job_failure_chunks
+         (job_failure_id, chunk_index, content, embedding)
+         VALUES ($1, $2, $3, $4)`,
+					[
+						jobFailureId,
+						emb?.chunkId,
+						emb?.content,
+						`[${emb?.embedding[0].join(',')}]`,
+					]
+				)
+					.catch(e => console.error(`Error inserting chunk ${i}`, e));
+			}
 
+		})
+		.catch(e => console.error("Error inserting job: ", e));
 }
 
 if (process.env.EXECUTION_CONTEXT === "host")

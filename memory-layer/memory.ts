@@ -1,6 +1,8 @@
 import type { Job, Queue } from "bullmq";
 import { queueMap } from "../queues";
-import { insertFailedJob } from "../sql";
+import { insertFailedJobAndChunkedEmbeddings } from "../sql";
+import { startSpinner } from "../utils";
+import type { ChunkedEmbedding } from "../reasoning-layer/types";
 
 const extractJobMetadata = async (job: Job) => {
 
@@ -43,9 +45,57 @@ const extractQueueMetadata = (queue: Queue | undefined) => {
 	}
 }
 
-export const storeJobToMemory = async (job: Job, codeContext: string) => {
 
-	console.log("\x1b[33m%s\x1b[0m", "> Storing failed job to memory...");
+const chunkText = (text: string, maxChars = 800, overlap = 200) => {
+	const chunks: string[] = [];
+	let start = 0;
+
+	while (start < text.length) {
+		const end = start + maxChars;
+		chunks.push(text.slice(start, end));
+		start = end - overlap;
+		if (start < 0) start = 0;
+	}
+
+	return chunks;
+}
+
+const generateEmbeddings = async (jobId: string, text: string) => {
+
+	const chunks = chunkText(text);
+	let allEmbeddings: ChunkedEmbedding[] = [];
+
+	for (let i = 0; i < chunks.length; i++) {
+		const response = await fetch(`http://localhost:8110/embedding`, {
+			method: "POST",
+			body: JSON.stringify({
+				content: chunks[i],
+				encoding_format: "float",
+				model: "all-MiniLM-L6-v2",
+			}),
+		});
+
+		if (!response.ok) {
+			const err = await response.text();
+			console.error("Error in embedding text: ", err)
+		}
+
+		const embeddings: any = await response.json();
+		const emb: any[] = embeddings[0].embedding;
+
+		allEmbeddings.push({
+			chunkId: i,
+			content: chunks[i] ?? "",
+			embedding: emb
+		});
+	}
+
+	return allEmbeddings;
+}
+
+export const storeJobToMemory = async (job: Job, codeContext: string, resolved: boolean, resolutionSummary: string) => {
+
+	const stopSpinner = startSpinner("Storing failed job in memory...");
 
 	const jobMetadata = await extractJobMetadata(job);
 	const env = extractEnvironmentMetadata();
@@ -71,6 +121,9 @@ export const storeJobToMemory = async (job: Job, codeContext: string) => {
 \n${Object.entries(env).map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v, null, 2) : v}`).join("\n")}\n
 `;
 
-	await insertFailedJob(job);
-	return embeddingText;
+	const embeddings = await generateEmbeddings(job.id!, embeddingText);
+
+	await insertFailedJobAndChunkedEmbeddings(job, resolved, resolutionSummary, embeddings);
+
+	stopSpinner();
 }

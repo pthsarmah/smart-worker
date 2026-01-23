@@ -5,7 +5,7 @@ import { QueueEvents } from "bullmq";
 export const loginQueue = new Queue('login', {
 	connection: connection,
 	defaultJobOptions: {
-		attempts: 5,
+		attempts: 2,
 		backoff: {
 			type: "exponential",
 			delay: 1000,

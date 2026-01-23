@@ -11,14 +11,14 @@ export function startSpinner(loadingText: string) {
 
 	let i = 0;
 	const timer = setInterval(function() {
-		stdout.write("\r" + "\x1b[33m" + characters[i++] + loadingText);
+		stdout.write("\r" + "\x1b[33m" + characters[i++] + " " + loadingText);
 		i = i >= characters.length ? 0 : i;
 	}, 150);
 
 	return () => {
-		clearInterval(timer)
-		stdout.write("\r")
-		stdout.write(cursorEsc.show)
+		clearInterval(timer);
+		stdout.write("\r\x1b[2K" + "\x1b[0m");
+		stdout.write(cursorEsc.show);
 	}
 }
 
