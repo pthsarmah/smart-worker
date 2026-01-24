@@ -17,7 +17,7 @@ const dbPool = new Pool({
 const createBaseTables = () => {
 	dbPool.query(`CREATE TABLE IF NOT EXISTS job_failures_metadata (
     id BIGSERIAL PRIMARY KEY,
-    job_id TEXT NOT NULL,
+    job_id BIGINT NOT NULL UNIQUE,
     job_name TEXT NOT NULL,
     queue_name TEXT NOT NULL,
     job_data JSONB,
@@ -35,23 +35,23 @@ const createBaseTables = () => {
     code_diff JSONB,
     CONSTRAINT uq_job_failure UNIQUE (queue_name, job_id)
 	);`)
-		.catch(e => console.log("Error creating tables", e));
+		.catch(e => console.error("Error creating tables", e));
 
 	dbPool.query(`CREATE TABLE IF NOT EXISTS job_failure_chunks (
     id BIGSERIAL PRIMARY KEY,
-    job_failure_id BIGINT NOT NULL REFERENCES job_failures_metadata(id) ON DELETE CASCADE,
+    job_failure_id BIGINT NOT NULL REFERENCES job_failures_metadata(job_id) ON DELETE CASCADE,
     chunk_index INTEGER NOT NULL,
     content TEXT NOT NULL,
-    embedding VECTOR(384) NOT NULL
+    embedding VECTOR(1024) NOT NULL
 	);`)
-		.catch(e => console.log("Error creating tables", e));
+		.catch(e => console.error("Error creating tables", e));
 
 	dbPool.query(`
 		CREATE INDEX IF NOT EXISTS idx_job_failures_metadata_lookup ON job_failures_metadata (queue_name, job_id);
 		CREATE INDEX IF NOT EXISTS idx_job_failures_metadata_failed_time ON job_failures_metadata (timestamp_failed DESC);
 		CREATE INDEX IF NOT EXISTS idx_job_failures_metadata_unresolved ON job_failures_metadata (resolved) WHERE resolved = false;
 	`)
-		.catch(e => console.log("Error creating tables", e));
+		.catch(e => console.error("Error creating tables", e));
 }
 
 export const getTopKEmbeddings = async (embeddings: ChunkedEmbedding[], k: number = 5) => {
@@ -60,23 +60,14 @@ export const getTopKEmbeddings = async (embeddings: ChunkedEmbedding[], k: numbe
 	for (const emb of embeddings) {
 		const res = await dbPool.query(
 			`
-		SELECT id, content, embedding <=> $1 as distance FROM job_failure_chunks ORDER BY distance LIMIT $2
+		SELECT id, job_failure_id, content, embedding <=> $1 as distance FROM job_failure_chunks ORDER BY distance LIMIT 1;
 		`,
-			[`[${emb.embedding.join(",")}]`, k]
+			[`[${emb.embedding.join(",")}]`]
 		);
-		allRes.push(...res.rows)
+		allRes.push(...res.rows.map(r => ({ ...r, queryChunk: emb.content })));
 	}
 
-	const best = new Map();
-
-	for (const row of allRes) {
-		const prev = best.get(row.id);
-		if (!prev || row.distance < prev.distance) {
-			best.set(row.id, row);
-		}
-	}
-
-	const final = [...best.values()]
+	const final = allRes
 		.sort((a, b) => a.distance - b.distance)
 		.slice(0, k);
 
@@ -106,7 +97,7 @@ export const insertFailedJobAndChunkedEmbeddings = async (job: Job, resolved: bo
 			$12, $13
    ) RETURNING id`,
 		[
-			String(job.id),
+			parseInt(job.id!),
 			job.name,
 			job.queueName,
 			job.data ?? null,
@@ -121,8 +112,7 @@ export const insertFailedJobAndChunkedEmbeddings = async (job: Job, resolved: bo
 			resolutionSummary,
 		]
 	)
-		.then(s => {
-			let jobFailureId = parseInt(s.rows[0].id);
+		.then(_ => {
 			for (let i = 0; i < embeddings.length; i++) {
 				const emb = embeddings[i];
 				dbPool.query(
@@ -130,7 +120,7 @@ export const insertFailedJobAndChunkedEmbeddings = async (job: Job, resolved: bo
          (job_failure_id, chunk_index, content, embedding)
          VALUES ($1, $2, $3, $4)`,
 					[
-						jobFailureId,
+						job.id!,
 						emb?.chunkId,
 						emb?.content,
 						`[${emb?.embedding[0].join(',')}]`,

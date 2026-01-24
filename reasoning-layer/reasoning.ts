@@ -243,11 +243,13 @@ ${fixedCode}
 
 	if (codeChanges.length > 0) {
 		const stopSpinner = startSpinner("Searching vector DB for similar jobs...");
-		const search = await searchJobFromMemory(codeContext);
+		const search = await searchJobFromMemory(job, codeContext);
 		stopSpinner();
 
 		if (search) {
-			console.log("\x1b[36m%s\x1b[0m", "> Similarities found!");
+			console.log("\x1b[36m%s\x1b[0m", `> Similarities found with job ${search.winner}!`);
+		} else {
+			console.log("\x1b[33m%s\x1b[0m", "> No similar jobs!");
 		}
 
 		return;
@@ -258,7 +260,7 @@ ${fixedCode}
 			const fixPrompt = jobContext + codeChangesContext;
 			const summary = await generateResolutionSummary(fixPrompt);
 			console.log("SUMMARY: \n\n", summary);
-			storeJobToMemory(job, codeContext, result, summary as string);
+			await storeJobToMemory(job, codeContext, result, summary as string);
 		}
 	}
 };

@@ -1,7 +1,7 @@
 import type { Job, Queue } from "bullmq";
 import { queueMap } from "../queues";
 import { getTopKEmbeddings, insertFailedJobAndChunkedEmbeddings } from "../sql";
-import { startSpinner } from "../utils";
+import { majorityVote, startSpinner } from "../utils";
 import type { ChunkedEmbedding } from "../reasoning-layer/types";
 
 const extractJobMetadata = async (job: Job) => {
@@ -46,7 +46,7 @@ const extractQueueMetadata = (queue: Queue | undefined) => {
 }
 
 
-const chunkText = (text: string, maxChars = 800, overlap = 200) => {
+const chunkText = (text: string, maxChars = 800, overlap = 100) => {
 	const chunks: string[] = [];
 	let start = 0;
 
@@ -71,7 +71,7 @@ const generateEmbeddings = async (text: string) => {
 			body: JSON.stringify({
 				content: chunks[i],
 				encoding_format: "float",
-				model: "all-MiniLM-L6-v2",
+				model: "bge-large-en-v1.5-f32",
 			}),
 		});
 
@@ -122,10 +122,14 @@ export const createEmbeddingText = async (job: Job, codeContext: string) => {
 	return embeddingText;
 }
 
-export const searchJobFromMemory = async (context: string) => {
-	const embeddings = await generateEmbeddings(context);
+export const searchJobFromMemory = async (job: Job, codeContext: string) => {
+	const embeddingText = await createEmbeddingText(job, codeContext);
+	const embeddings = await generateEmbeddings(embeddingText);
 	const final = await getTopKEmbeddings(embeddings, 15);
-	return final;
+	const jobIds = final.map(f => parseInt(f.job_failure_id));
+	const electionResults = majorityVote(jobIds);
+
+	return electionResults;
 }
 
 export const storeJobToMemory = async (job: Job, codeContext: string, resolved: boolean, resolutionSummary: string) => {
@@ -138,4 +142,5 @@ export const storeJobToMemory = async (job: Job, codeContext: string, resolved: 
 	await insertFailedJobAndChunkedEmbeddings(job, resolved, resolutionSummary, embeddings);
 
 	stopSpinner();
+	console.log("\x1b[36m%s\x1b[0m", "> Failed job stored to memory")
 }

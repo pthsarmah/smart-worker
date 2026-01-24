@@ -1,5 +1,59 @@
 import { stdout } from "process"
 import * as Diff from 'diff';
+import type { MajorityResult } from "./reasoning-layer/types";
+
+export function majorityVote<T>(
+	values: readonly T[],
+	equals: (a: T, b: T) => boolean = Object.is
+): MajorityResult<T> {
+	if (!Array.isArray(values)) {
+		throw new TypeError("values must be an array");
+	}
+
+	if (values.length === 0) {
+		throw new Error("majorityVote: empty input");
+	}
+
+	const counts: { value: T; count: number }[] = [];
+
+	for (const v of values) {
+		let found = false;
+
+		for (const entry of counts) {
+			if (equals(entry.value, v)) {
+				entry.count++;
+				found = true;
+				break;
+			}
+		}
+
+		if (!found) {
+			counts.push({ value: v, count: 1 });
+		}
+	}
+
+	let max = 0;
+	for (const { count } of counts) {
+		if (count > max) max = count;
+	}
+
+	const winners = counts.filter(e => e.count === max);
+	const majorityThreshold = Math.floor(values.length / 2) + 1;
+
+	if (max < majorityThreshold) {
+		return { winner: null, count: max, total: values.length, tied: true };
+	}
+
+	if (winners.length > 1) {
+		return { winner: null, count: max, total: values.length, tied: true };
+	}
+
+	return {
+		winner: winners[0]?.value!,
+		count: winners[0]?.count!,
+		total: values.length,
+	};
+}
 
 export function startSpinner(loadingText: string) {
 	const characters = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']

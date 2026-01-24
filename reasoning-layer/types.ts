@@ -9,3 +9,7 @@ export type ChunkedEmbedding = {
 	content: string;
 	embedding: any[],
 }
+
+export type MajorityResult<T> =
+	| { winner: T; count: number; total: number }
+	| { winner: null; count: number; total: number; tied: true };
