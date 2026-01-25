@@ -81,7 +81,7 @@ const generateEmbeddings = async (text: string) => {
 		}
 
 		const embeddings: any = await response.json();
-		const emb: any[] = embeddings[0].embedding;
+		const emb: number[] = embeddings[0].embedding;
 
 		allEmbeddings.push({
 			chunkId: i,

@@ -26,7 +26,7 @@ CMD ["sh", "-c", "redis-server --daemonize no --port 6800 & exec bun run reasoni
 export const prepareDockerContainer = async (dockerfileContent: string) => {
 	try {
 		const bytes = await Bun.write(`${import.meta.dir}/Dockerfile.temp`, dockerfileContent);
-		if (bytes > 0) console.log("\x1b[36m%s\x1b[0m", ">> Dockerfile written!");
+		if (bytes > 0) console.log("\x1b[36m%s\x1b[0m", "> Dockerfile written!");
 		else throw new Error('No bytes written');
 	} catch (e) {
 		console.error("Error creating dockerfile: ", e);
@@ -88,8 +88,8 @@ export const spinUpSandboxAndRunAICodeChanges = async (job: Job, codeChanges: Co
 		const result = await runFailedJob(job, sPort.toString());
 
 		if (result.success) {
-			console.log("\x1b[36m%s\x1b[0m", `>> Job ${job.id} ran successfully in sandbox.`);
-			console.log("\x1b[36m%s\x1b[0m", `>> Email sent with proposed changes`);
+			console.log("\x1b[36m%s\x1b[0m", `> Job ${job.id} ran successfully in sandbox.`);
+			console.log("\x1b[36m%s\x1b[0m", `> Email sent with proposed changes`);
 
 			const html = codeChanges.map(c => {
 				const codeHtml = getDiffHTML(JSON.stringify(c.originalCode), JSON.stringify(c.code));

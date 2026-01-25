@@ -205,7 +205,7 @@ STRICT OUTPUT RULES:
 		});
 	}
 	catch (e: any) {
-		console.error('Error connecting with LLM!');
+		console.error('Error connecting with LLM: ', e);
 		stopSpinner();
 		return;
 	}

@@ -7,7 +7,7 @@ export interface CodeChange {
 export type ChunkedEmbedding = {
 	chunkId: number;
 	content: string;
-	embedding: any[],
+	embedding: number[],
 }
 
 export type MajorityResult<T> =
