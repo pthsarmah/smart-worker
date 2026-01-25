@@ -133,5 +133,15 @@ export const insertFailedJobAndChunkedEmbeddings = async (job: Job, resolved: bo
 		.catch(e => console.error("Error inserting job: ", e));
 }
 
+export const getJobResolutionSummary = async (job_id: number) => {
+	const summary = await dbPool.query(
+		`
+		SELECT resolution_summary AS summary from job_failures_metadata WHERE job_id = $1 LIMIT 1;
+		`, [job_id],
+	);
+
+	return summary.rows[0].summary as string;
+}
+
 if (process.env.EXECUTION_CONTEXT === "host")
 	createBaseTables();

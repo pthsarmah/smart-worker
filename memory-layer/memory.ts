@@ -1,6 +1,6 @@
 import type { Job, Queue } from "bullmq";
 import { queueMap } from "../queues";
-import { getTopKEmbeddings, insertFailedJobAndChunkedEmbeddings } from "../sql";
+import { getJobResolutionSummary, getTopKEmbeddings, insertFailedJobAndChunkedEmbeddings } from "../sql";
 import { majorityVote, startSpinner } from "../utils";
 import type { ChunkedEmbedding } from "../reasoning-layer/types";
 
@@ -129,7 +129,9 @@ export const searchJobFromMemory = async (job: Job, codeContext: string) => {
 	const jobIds = final.map(f => parseInt(f.job_failure_id));
 	const electionResults = majorityVote(jobIds);
 
-	return electionResults;
+	const resolutionSummary = await getJobResolutionSummary(electionResults.winner!);
+
+	return { electionResults, resolutionSummary };
 }
 
 export const storeJobToMemory = async (job: Job, codeContext: string, resolved: boolean, resolutionSummary: string) => {

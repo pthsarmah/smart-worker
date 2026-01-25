@@ -139,12 +139,33 @@ Output: One short resolution summary paragraph.
 export const jobFailureReasoning = async (job: Job) => {
 
 	const { jobContext, codeContext } = await getStacktracePathsCodeContext(job);
-	const prompt = jobContext + "" + codeContext;
+	var prompt = jobContext + "" + codeContext;
+
+	let stopSpinner = startSpinner("Searching vector DB for similar jobs...");
+	const { electionResults, resolutionSummary } = await searchJobFromMemory(job, codeContext);
+	stopSpinner();
+
+	if (electionResults && resolutionSummary) {
+		console.log("\x1b[36m%s\x1b[0m", `> Similarities found with job ${electionResults.winner}!`);
+		prompt = `
+===================================================
+PREVIOUS SIMILAR JOB RESOLUTION SUMMARY (JOB ${electionResults.winner})
+===================================================
+	${resolutionSummary}
+		\n` + prompt;
+	} else {
+		console.log("\x1b[33m%s\x1b[0m", "> No similar jobs!");
+	}
+
 	const messages = [
 		{
 			role: "system",
 			content: `You are a senior software engineer.
 Your task is to **REWRITE** the provided code to resolve the job failure.
+
+**READ PREVIOUS RESOLUTION SUMMARIES IF AVAILABLE:** 
+	 -- You must ALWAYS read the PREVIOUS SIMILARY JOB RESOLUTION SUMMARY if AVAILABLE and TRY to solve the error with that information.
+	 -- If the resolution summary is non-similar or incomprehensible, ignore it.
 
 STRICT OUTPUT RULES:
 1. **ACTUAL CODE CHANGES:** You must **modify the code logic** to fix the bug. Do not just comment on the error.
@@ -152,7 +173,7 @@ STRICT OUTPUT RULES:
    - The code you output must be the **working, fixed version**.
 
 2. **FORMAT:**
-   - **File Path First:** Line 1 must be \`// File: path/to/file.ts\`
+   - **File Path First:** Line 1 must be \`// File: <path/to/file.ts>\`
    - **No Markdown/Text:** Output *only* the raw code.
    - **Indentation:** Use 4 spaces (no tabs).
 
@@ -168,7 +189,7 @@ STRICT OUTPUT RULES:
 		}
 	];
 
-	const stopSpinner = startSpinner("Sending code to LLM for fix...");
+	stopSpinner = startSpinner("Sending code to LLM for fix...");
 	let response;
 
 	try {
@@ -193,7 +214,7 @@ STRICT OUTPUT RULES:
 
 	const responseJson: any = await response.json();
 	const reasonText = JSON.stringify(responseJson["choices"][0]["message"]["content"]);
-	const rootDir = process.env.APP_ROOT_DIR;
+	const rootDir = process.env.APP_ROOT_DIR!;
 
 	if (!rootDir) {
 		console.log("No root directory found!");
@@ -242,18 +263,6 @@ ${fixedCode}
 	}
 
 	if (codeChanges.length > 0) {
-		const stopSpinner = startSpinner("Searching vector DB for similar jobs...");
-		const search = await searchJobFromMemory(job, codeContext);
-		stopSpinner();
-
-		if (search) {
-			console.log("\x1b[36m%s\x1b[0m", `> Similarities found with job ${search.winner}!`);
-		} else {
-			console.log("\x1b[33m%s\x1b[0m", "> No similar jobs!");
-		}
-
-		return;
-
 		console.log("\x1b[36m%s\x1b[0m", "> Fix sent! Testing in Docker sandbox...");
 		const result = await spinUpSandboxAndRunAICodeChanges(job, codeChanges);
 		if (result) {
