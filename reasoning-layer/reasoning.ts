@@ -142,11 +142,11 @@ export const jobFailureReasoning = async (job: Job) => {
 	var prompt = jobContext + "" + codeContext;
 
 	let stopSpinner = startSpinner("Searching vector DB for similar jobs...");
-	const { electionResults, resolutionSummary } = await searchJobFromMemory(job, codeContext);
+	const { electionResults, resolutionSummary, meanDistance } = await searchJobFromMemory(job, codeContext);
 	stopSpinner();
 
 	if (electionResults && resolutionSummary) {
-		console.log("\x1b[36m%s\x1b[0m", `> Similarities found with job ${electionResults.winner}!`);
+		console.log("\x1b[36m%s\x1b[0m", `> Similarities found with job ${electionResults.winner}! \nSimilarity %: ${(1 - meanDistance) * 100} \nMean Distance: ${meanDistance}`);
 		prompt = `
 ===================================================
 PREVIOUS SIMILAR JOB RESOLUTION SUMMARY (JOB ${electionResults.winner})
@@ -156,6 +156,8 @@ PREVIOUS SIMILAR JOB RESOLUTION SUMMARY (JOB ${electionResults.winner})
 	} else {
 		console.log("\x1b[33m%s\x1b[0m", "> No similar jobs!");
 	}
+
+	return;
 
 	const messages = [
 		{

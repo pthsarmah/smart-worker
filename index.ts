@@ -28,9 +28,11 @@ app.post("/job", async (req, res) => {
 		return res.status(400).json({ error: "Missing name or data" });
 	}
 
-	data["reasoning_fix"] = false;
+	const newData = { ...data };
 
-	const job = await loginQueue.add(name, data, {
+	newData["reasoning_fix"] = newData["reasoning_fix"] ? false : true;
+
+	const job = await loginQueue.add(name, newData, {
 		removeOnComplete: true,
 		removeOnFail: true,
 	});

@@ -126,12 +126,18 @@ export const searchJobFromMemory = async (job: Job, codeContext: string) => {
 	const embeddingText = await createEmbeddingText(job, codeContext);
 	const embeddings = await generateEmbeddings(embeddingText);
 	const final = await getTopKEmbeddings(embeddings, 15);
+
+	console.log(final);
+
+	const distances = final.map(f => f.distance);
+	const meanDistance = distances.reduce((a, b) => a + b, 0) / distances.length;
+
 	const jobIds = final.map(f => parseInt(f.job_failure_id));
 	const electionResults = majorityVote(jobIds);
 
 	const resolutionSummary = await getJobResolutionSummary(electionResults.winner!);
 
-	return { electionResults, resolutionSummary };
+	return { electionResults, resolutionSummary, meanDistance };
 }
 
 export const storeJobToMemory = async (job: Job, codeContext: string, resolved: boolean, resolutionSummary: string) => {

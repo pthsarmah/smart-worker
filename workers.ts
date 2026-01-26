@@ -6,8 +6,13 @@ import { loginDLQ, loginQueue } from "./queues";
 const loginWorker = new Worker('login', async job => {
 	console.log('Processing job', job.id);
 
-	//Intentional failure for testing
+	//Job data hazard testing
 	if (job.data.num === 10) {
+		throw new Error(`Failed job ${job.id}`);
+	}
+
+	//Environment variable hazard testing
+	if (!process.env.TEST_ENV_VAR) {
 		throw new Error(`Failed job ${job.id}`);
 	}
 

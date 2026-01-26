@@ -123,7 +123,7 @@ export const insertFailedJobAndChunkedEmbeddings = async (job: Job, resolved: bo
 						job.id!,
 						emb?.chunkId,
 						emb?.content,
-						`[${emb?.embedding[0].join(',')}]`,
+						`[${emb?.embedding.join(',')}]`,
 					]
 				)
 					.catch(e => console.error(`Error inserting chunk ${i}`, e));
