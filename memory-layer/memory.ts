@@ -1,8 +1,15 @@
 import type { Job, Queue } from "bullmq";
 import { queueMap } from "../queues";
-import { getJobResolutionSummary, getTopKEmbeddings, insertFailedJobAndChunkedEmbeddings } from "../sql";
+import { getJobResolutionSummary, getTopKCategorizedEmbeddings, insertFailedJobAndCategorizedEmbeddings } from "../sql";
 import { majorityVote, startSpinner } from "../utils";
-import type { ChunkedEmbedding } from "../reasoning-layer/types";
+import type { CategorizedEmbedding, EmbeddingCategory, StructuredFailureContext } from "../reasoning-layer/types";
+
+const CATEGORY_WEIGHTS: Record<EmbeddingCategory, number> = {
+	error_signature: 3.0,
+	failure_location: 2.0,
+	code_context: 1.0,
+	metadata: 0.5
+};
 
 const extractJobMetadata = async (job: Job) => {
 
@@ -45,52 +52,73 @@ const extractQueueMetadata = (queue: Queue | undefined) => {
 	}
 }
 
+const generateSingleEmbedding = async (text: string): Promise<number[]> => {
+	const response = await fetch(`http://localhost:8110/embedding`, {
+		method: "POST",
+		body: JSON.stringify({
+			content: text,
+			encoding_format: "float",
+			model: "bge-large-en-v1.5-f32",
+		}),
+	});
 
-const chunkText = (text: string, maxChars = 800, overlap = 100) => {
-	const chunks: string[] = [];
-	let start = 0;
-
-	while (start < text.length) {
-		const end = start + maxChars;
-		chunks.push(text.slice(start, end));
-		start = end - overlap;
-		if (start < 0) start = 0;
+	if (!response.ok) {
+		const err = await response.text();
+		console.error("Error in embedding text: ", err);
+		return [];
 	}
 
-	return chunks;
+	const embeddings: any = await response.json();
+	return embeddings[0].embedding as number[];
 }
 
-const generateEmbeddings = async (text: string) => {
+const generateCategorizedEmbeddings = async (
+	structuredContext: StructuredFailureContext
+): Promise<CategorizedEmbedding[]> => {
+	const embeddings: CategorizedEmbedding[] = [];
 
-	const chunks = chunkText(text);
-	let allEmbeddings: ChunkedEmbedding[] = [];
-
-	for (let i = 0; i < chunks.length; i++) {
-		const response = await fetch(`http://localhost:8110/embedding`, {
-			method: "POST",
-			body: JSON.stringify({
-				content: chunks[i],
-				encoding_format: "float",
-				model: "bge-large-en-v1.5-f32",
-			}),
-		});
-
-		if (!response.ok) {
-			const err = await response.text();
-			console.error("Error in embedding text: ", err)
-		}
-
-		const embeddings: any = await response.json();
-		const emb: number[] = embeddings[0].embedding;
-
-		allEmbeddings.push({
-			chunkId: i,
-			content: chunks[i] ?? "",
-			embedding: emb
+	const errorSigText = `ERROR: ${structuredContext.errorSignature.errorType} - ${structuredContext.errorSignature.normalizedSignature}`;
+	const errorSigEmb = await generateSingleEmbedding(errorSigText);
+	if (errorSigEmb.length > 0) {
+		embeddings.push({
+			category: 'error_signature',
+			chunkId: 0,
+			content: errorSigText,
+			embedding: errorSigEmb,
+			weight: CATEGORY_WEIGHTS.error_signature
 		});
 	}
 
-	return allEmbeddings;
+	for (let i = 0; i < structuredContext.focusedSnippets.length; i++) {
+		const snippet = structuredContext.focusedSnippets[i];
+		if (!snippet) continue;
+
+		const locText = `FAILURE at ${snippet.filePath}:${snippet.failureLine}\n${snippet.content}`;
+		const locEmb = await generateSingleEmbedding(locText);
+		if (locEmb.length > 0) {
+			embeddings.push({
+				category: 'failure_location',
+				chunkId: i,
+				content: locText,
+				embedding: locEmb,
+				weight: CATEGORY_WEIGHTS.failure_location
+			});
+		}
+	}
+
+	const metadataText = `JOB: ${structuredContext.jobMetadata.name} DATA: ${JSON.stringify(structuredContext.jobMetadata.data)}`;
+	const metadataEmb = await generateSingleEmbedding(metadataText);
+	if (metadataEmb.length > 0) {
+		embeddings.push({
+			category: 'metadata',
+			chunkId: 0,
+			content: metadataText,
+			embedding: metadataEmb,
+			weight: CATEGORY_WEIGHTS.metadata
+		});
+	}
+
+	return embeddings;
 }
 
 export const createEmbeddingText = async (job: Job, codeContext: string) => {
@@ -122,32 +150,36 @@ export const createEmbeddingText = async (job: Job, codeContext: string) => {
 	return embeddingText;
 }
 
-export const searchJobFromMemory = async (job: Job, codeContext: string) => {
-	const embeddingText = await createEmbeddingText(job, codeContext);
-	const embeddings = await generateEmbeddings(embeddingText);
-	const final = await getTopKEmbeddings(embeddings, 15);
+export const searchJobFromMemory = async (structuredContext: StructuredFailureContext) => {
+	const embeddings = await generateCategorizedEmbeddings(structuredContext);
+	const { results: final, signatureMatch } = await getTopKCategorizedEmbeddings(embeddings, 15);
 
-	console.log(final);
+	if (final.length === 0) {
+		return { electionResults: null, resolutionSummary: null, meanDistance: 1.0, signatureMatch: false };
+	}
 
-	const distances = final.map(f => f.distance);
+	const distances = final.map(f => f.weightedDistance);
 	const meanDistance = distances.reduce((a, b) => a + b, 0) / distances.length;
 
 	const jobIds = final.map(f => parseInt(f.job_failure_id));
 	const electionResults = majorityVote(jobIds);
 
-	const resolutionSummary = await getJobResolutionSummary(electionResults.winner!);
+	if (!electionResults.winner) {
+		return { electionResults: null, resolutionSummary: null, meanDistance, signatureMatch };
+	}
 
-	return { electionResults, resolutionSummary, meanDistance };
+	const resolutionSummary = await getJobResolutionSummary(electionResults.winner);
+
+	return { electionResults, resolutionSummary, meanDistance, signatureMatch };
 }
 
-export const storeJobToMemory = async (job: Job, codeContext: string, resolved: boolean, resolutionSummary: string) => {
+export const storeJobToMemory = async (job: Job, structuredContext: StructuredFailureContext, resolved: boolean, resolutionSummary: string) => {
 
 	const stopSpinner = startSpinner("Storing failed job in memory...");
 
-	const embeddingText = await createEmbeddingText(job, codeContext);
-	const embeddings = await generateEmbeddings(embeddingText);
+	const embeddings = await generateCategorizedEmbeddings(structuredContext);
 
-	await insertFailedJobAndChunkedEmbeddings(job, resolved, resolutionSummary, embeddings);
+	await insertFailedJobAndCategorizedEmbeddings(job, resolved, resolutionSummary, embeddings);
 
 	stopSpinner();
 	console.log("\x1b[36m%s\x1b[0m", "> Failed job stored to memory")

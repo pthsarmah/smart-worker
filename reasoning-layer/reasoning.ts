@@ -1,6 +1,6 @@
 import type { Job } from "bullmq";
 import fs from "fs/promises";
-import type { CodeChange } from "./types";
+import type { ErrorSignature, FailureLocation, FocusedCodeSnippet, StructuredFailureContext } from "./types";
 import { spinUpSandboxAndRunAICodeChanges } from "./sandbox";
 import { startSpinner } from "../utils";
 import { searchJobFromMemory, storeJobToMemory } from "../memory-layer/memory";
@@ -8,7 +8,91 @@ import { searchJobFromMemory, storeJobToMemory } from "../memory-layer/memory";
 const NODE_STACK_PATH_RE =
 	/\(?((?:[A-Za-z]:\\|\/)?[^():\n]+\.(?:js|ts|mjs|cjs)):\d+:\d+\)?/g;
 
+const STACK_FRAME_RE =
+	/at\s+(?:(?<func>[^\s(]+)\s+)?\(?(?<file>(?:[A-Za-z]:\\|\/)?[^():\n]+\.(?:js|ts|mjs|cjs)):(?<line>\d+):(?<col>\d+)\)?/g;
+
+const ERROR_TYPE_RE = /^(?<type>[A-Z][a-zA-Z]*Error):\s*(?<message>.+)$/m;
+
 const TS_CAPTURE_REGEX = /\/\/ File:\s*(.*?)(?:\\n)+(?:```(?:\w+)?(?:\\n)+)?([\s\S]*?)(?=(?:\\n)*```|(?=(?:\\n)*\/\/ File:)|$)/g;
+
+const SNIPPET_CONTEXT_LINES = 12;
+
+function extractErrorSignature(stacktrace: string, failedReason?: string): ErrorSignature {
+	const errorMatch = ERROR_TYPE_RE.exec(stacktrace) || ERROR_TYPE_RE.exec(failedReason || '');
+
+	const errorType = errorMatch?.groups?.type || 'Error';
+	const errorMessage = errorMatch?.groups?.message || failedReason || 'Unknown error';
+
+	const normalizedMessage = errorMessage
+		.replace(/job\s+\d+/gi, 'job <ID>')
+		.replace(/\d{13,}/g, '<TIMESTAMP>')
+		.replace(/\b[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\b/gi, '<UUID>')
+		.replace(/\b\d+\b/g, '<N>')
+		.trim();
+
+	const normalizedSignature = `${errorType}:${normalizedMessage}`;
+
+	return {
+		errorType,
+		errorMessage,
+		normalizedSignature
+	};
+}
+
+function extractFailureLocations(stacktrace: string): FailureLocation[] {
+	const locations: FailureLocation[] = [];
+	const seen = new Set<string>();
+
+	for (const match of stacktrace.matchAll(STACK_FRAME_RE)) {
+		const filePath = match.groups?.file || '';
+		const lineNumber = parseInt(match.groups?.line || '0', 10);
+		const columnNumber = parseInt(match.groups?.col || '0', 10);
+		const functionName = match.groups?.func || null;
+
+		if (filePath.includes('/node_modules/')) continue;
+
+		const key = `${filePath}:${lineNumber}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
+
+		locations.push({ filePath, lineNumber, columnNumber, functionName });
+	}
+
+	return locations;
+}
+
+async function extractFocusedSnippet(
+	filePath: string,
+	failureLine: number
+): Promise<FocusedCodeSnippet | null> {
+	try {
+		const fileUrl = new URL(filePath, import.meta.url);
+		const content = await fs.readFile(fileUrl, "utf8");
+		const lines = content.split('\n');
+
+		const startLine = Math.max(1, failureLine - SNIPPET_CONTEXT_LINES);
+		const endLine = Math.min(lines.length, failureLine + SNIPPET_CONTEXT_LINES);
+
+		const snippetLines = lines.slice(startLine - 1, endLine);
+		const numberedSnippet = snippetLines
+			.map((line, idx) => {
+				const lineNum = startLine + idx;
+				const marker = lineNum === failureLine ? '>>>' : '   ';
+				return `${marker} ${lineNum.toString().padStart(4)}: ${line}`;
+			})
+			.join('\n');
+
+		return {
+			filePath,
+			startLine,
+			endLine,
+			failureLine,
+			content: numberedSnippet
+		};
+	} catch {
+		return null;
+	}
+}
 
 function getFilePaths(stacktrace: string) {
 	const seen = new Set();
@@ -25,11 +109,36 @@ function getFilePaths(stacktrace: string) {
 	return paths.filter(p => !p.includes("/node_modules/"));
 }
 
+export async function extractStructuredFailureContext(job: Job): Promise<StructuredFailureContext> {
+	const stacktrace = job.stacktrace?.[0] as string || '';
+
+	const errorSignature = extractErrorSignature(stacktrace, job.failedReason);
+	const failureLocations = extractFailureLocations(stacktrace);
+
+	const snippetPromises = failureLocations.slice(0, 3).map(loc =>
+		extractFocusedSnippet(loc.filePath, loc.lineNumber)
+	);
+	const snippetResults = await Promise.all(snippetPromises);
+	const focusedSnippets = snippetResults.filter((s): s is FocusedCodeSnippet => s !== null);
+
+	return {
+		errorSignature,
+		failureLocations,
+		focusedSnippets,
+		jobMetadata: {
+			name: job.name,
+			id: job.id,
+			data: job.data
+		}
+	};
+}
+
 export async function getStacktracePathsCodeContext(job: Job) {
+	const structuredContext = await extractStructuredFailureContext(job);
 	const filePaths = getFilePaths(job.stacktrace[0] as string);
 	filePaths.push(job.data.callfile);
 
-	let codeContext: string = '';
+	let fullCodeContext: string = '';
 	let jobContext = `
 ==================
 JOB METADATA
@@ -39,21 +148,39 @@ Data: ${JSON.stringify(job.data)}
 ID: ${job.id}
 
 ==================
+ERROR SIGNATURE
+==================
+Type: ${structuredContext.errorSignature.errorType}
+Message: ${structuredContext.errorSignature.errorMessage}
+Normalized: ${structuredContext.errorSignature.normalizedSignature}
+
+==================
+FAILURE LOCATIONS
+==================
+${structuredContext.failureLocations.map((loc, i) =>
+		`[${i + 1}] ${loc.filePath}:${loc.lineNumber}:${loc.columnNumber}${loc.functionName ? ` in ${loc.functionName}()` : ''}`
+	).join('\n')}
+
+==================
 STACKTRACE
 ==================
 ${job.stacktrace[0] as string}
 
 ==================
-CODE CONTEXT
+FOCUSED CODE SNIPPETS
 ==================
 `;
+
+	const focusedSnippetsContext = structuredContext.focusedSnippets.map((snippet, i) =>
+		`--- Snippet ${i + 1}: ${snippet.filePath} (lines ${snippet.startLine}-${snippet.endLine}, failure at ${snippet.failureLine}) ---\n${snippet.content}`
+	).join('\n\n');
 
 	for (let i = 0; i < filePaths.length; i++) {
 		const path = filePaths[i] as string;
 		try {
 			const filePath = new URL(path, import.meta.url)
 			const data = await fs.readFile(filePath, "utf8");
-			codeContext += `FILE ${i + 1}: ${path}
+			fullCodeContext += `FILE ${i + 1}: ${path}
 CODE IN FILE ${i + 1}:
 \`\`\`
 ${data}
@@ -61,14 +188,19 @@ ${data}
 
 `;
 		} catch (err: any) {
-			codeContext += `FILE ${i + 1}: ${path}
+			fullCodeContext += `FILE ${i + 1}: ${path}
 ERROR: Could not read file (${err.message})
 
 `;
 		}
 	}
 
-	return { jobContext, codeContext };
+	return {
+		jobContext,
+		codeContext: fullCodeContext,
+		structuredContext,
+		focusedSnippetsContext
+	};
 }
 
 const generateResolutionSummary = async (fixPrompt: string) => {
@@ -138,15 +270,16 @@ Output: One short resolution summary paragraph.
 
 export const jobFailureReasoning = async (job: Job) => {
 
-	const { jobContext, codeContext } = await getStacktracePathsCodeContext(job);
-	var prompt = jobContext + "" + codeContext;
+	const { jobContext, codeContext, structuredContext, focusedSnippetsContext } = await getStacktracePathsCodeContext(job);
+	var prompt = jobContext + focusedSnippetsContext + "\n\n==================\nFULL CODE CONTEXT\n==================\n" + codeContext;
 
 	let stopSpinner = startSpinner("Searching vector DB for similar jobs...");
-	const { electionResults, resolutionSummary, meanDistance } = await searchJobFromMemory(job, codeContext);
+	const { electionResults, resolutionSummary, meanDistance, signatureMatch } = await searchJobFromMemory(structuredContext);
 	stopSpinner();
 
 	if (electionResults && resolutionSummary) {
-		console.log("\x1b[36m%s\x1b[0m", `> Similarities found with job ${electionResults.winner}! \nSimilarity %: ${(1 - meanDistance) * 100} \nMean Distance: ${meanDistance}`);
+		const matchType = signatureMatch ? "error signature" : "code context";
+		console.log("\x1b[36m%s\x1b[0m", `> Similarities found with job ${electionResults.winner}! (matched by ${matchType})\nSimilarity %: ${((1 - meanDistance) * 100).toFixed(2)} \nMean Distance: ${meanDistance.toFixed(4)}`);
 		prompt = `
 ===================================================
 PREVIOUS SIMILAR JOB RESOLUTION SUMMARY (JOB ${electionResults.winner})
@@ -156,8 +289,6 @@ PREVIOUS SIMILAR JOB RESOLUTION SUMMARY (JOB ${electionResults.winner})
 	} else {
 		console.log("\x1b[33m%s\x1b[0m", "> No similar jobs!");
 	}
-
-	return;
 
 	const messages = [
 		{
@@ -271,7 +402,7 @@ ${fixedCode}
 			const fixPrompt = jobContext + codeChangesContext;
 			const summary = await generateResolutionSummary(fixPrompt);
 			console.log("SUMMARY: \n\n", summary);
-			await storeJobToMemory(job, codeContext, result, summary as string);
+			await storeJobToMemory(job, structuredContext, result, summary as string);
 		}
 	}
 };
