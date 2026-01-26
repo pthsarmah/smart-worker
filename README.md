@@ -8,6 +8,9 @@ This project is a robust job processing system built with Bun, TypeScript, and B
 - **AI-Powered Error Resolution:** When a job repeatedly fails, it's passed to an AI layer. The AI analyzes the stack trace and relevant code, generates a fix, and tests it in a sandboxed environment.
 - **Docker Sandbox:** Proposed fixes are tested in an isolated Docker container to ensure they are effective and don't introduce new issues.
 - **Memory Layer:** Stores failed job metadata, stack traces, and code context in a PostgreSQL database with `pgvector` embeddings for future analysis and retrieval.
+- **Categorized Embeddings:** Failure context is split into weighted categories (error signature, failure location, code context, metadata) for more accurate similarity matching.
+- **Structured Failure Context:** Automatically extracts error signatures, parses stack trace locations, and generates focused code snippets around failure points.
+- **Similarity Search with Majority Voting:** When a job fails, the system searches for similar past failures using weighted embeddings and elects the best match via majority vote.
 - **Email Notifications:** If a fix is successful (or fails), an email is sent with the results and code changes, allowing for review and manual application.
 - **Dead Letter Queue (DLQ):** Failed jobs are moved to a DLQ for manual inspection or reprocessing.
 - **Express API:** A simple Express.js server provides endpoints to add new jobs and trigger the AI resolution flow.
@@ -18,34 +21,40 @@ This project is a robust job processing system built with Bun, TypeScript, and B
 2.  **Job Processing:** A `loginWorker` processes jobs from the queue.
 3.  **Failure Detection:** If a job fails multiple times (as defined by the job's `attempts` option), the `failed` event listener on the worker moves the job to the `loginDLQ` (Dead Letter Queue).
 4.  **AI Intervention:** If the `reasoning_fix` flag is set on the job data, the `jobFailureReasoning` function is triggered.
-5.  **Code Analysis:** The AI layer gathers context from the job's stack trace and the source code of the files involved in the error.
-6.  **LLM Interaction:** The code and error information are sent to an LLM with a prompt asking it to fix the code.
-7.  **Sandbox Testing:** The LLM's proposed code changes are applied in a temporary Docker container (a "sandbox"). The failed job is then re-run within this sandbox using the `login-sandbox` queue.
-8.  **Success Notification:** If the job succeeds in the sandbox, an email is sent with the proposed code changes.
-9.  **Memory Storage:** Successfully resolved (or analyzed) failures are stored in the Memory Layer. This includes generating embeddings for the job context and storing them in PostgreSQL using `pgvector`.
-10. **Sandbox Destruction:** The Docker sandbox container is destroyed after the test run.
+5.  **Structured Context Extraction:** The system extracts structured failure context including:
+    - **Error Signature:** Normalized error type and message (with dynamic values like IDs/timestamps replaced)
+    - **Failure Locations:** Parsed stack trace with file paths, line numbers, and function names
+    - **Focused Code Snippets:** Code surrounding each failure location with line markers
+6.  **Memory Search:** Before generating a fix, the system searches for similar past failures using categorized embeddings with weighted distances. A majority vote algorithm selects the best matching previous job.
+7.  **LLM Interaction:** The code, error information, and any relevant past resolution summaries are sent to an LLM with a prompt asking it to fix the code.
+8.  **Sandbox Testing:** The LLM's proposed code changes are applied in a temporary Docker container (a "sandbox"). The failed job is then re-run within this sandbox using the `login-sandbox` queue.
+9.  **Success Notification:** If the job succeeds in the sandbox, an email is sent with the proposed code changes.
+10. **Resolution Summary:** On successful fix, an LLM generates a concise resolution summary explaining the root cause and applied fix.
+11. **Memory Storage:** Resolved failures are stored in the Memory Layer with categorized embeddings (error signature, failure location, code context, metadata) weighted by importance for future similarity matching.
+12. **Sandbox Destruction:** The Docker sandbox container is destroyed after the test run.
 
 ## Project Structure
 
 ```
 .
 ├── memory-layer/
-│   └── memory.ts           # Logic for chunking and storing context in the memory layer
+│   └── memory.ts           # Categorized embedding generation, weighted similarity search, and memory storage
 ├── reasoning-layer/
 │   ├── destroy-sandbox.ts  # Functions to clean up Docker containers
 │   ├── entrypoint.ts       # Entrypoint for the Docker sandbox
-│   ├── reasoning.ts        # Handles interaction with the LLM and orchestrates fixes
+│   ├── reasoning.ts        # Handles structured context extraction, LLM interaction, and fix orchestration
 │   ├── run-job.ts          # Logic to run the job within the sandbox
 │   ├── sandbox.ts          # Functions for creating and managing the Docker sandbox
-│   └── types.ts            # TypeScript types for the AI layer
+│   └── types.ts            # TypeScript types including categorized embeddings and structured failure context
 ├── email.ts                # Email client for sending notifications
 ├── index.ts                # Main application entrypoint and Express server
 ├── package.json            # Project dependencies and scripts
 ├── queues.ts               # BullMQ queue definitions
 ├── redis.ts                # Redis connection setup
-├── sql.ts                  # PostgreSQL/pgvector connection and schema setup
+├── sql.ts                  # PostgreSQL/pgvector connection, schema, and categorized embedding queries
+├── test.ts                 # TUI for testing hazard scenarios and viewing similarity percentages
 ├── tsconfig.json           # TypeScript configuration
-├── utils.ts                # Utility functions
+├── utils.ts                # Utility functions (includes majority vote algorithm)
 └── workers.ts              # BullMQ worker definitions
 ```
 
