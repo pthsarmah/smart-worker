@@ -1,5 +1,7 @@
 # SmartWorker - Job Processing System with AI-Powered Error Resolution
 
+<img src="assets/smart-worker.png">
+
 This project is a robust job processing system built with Bun, TypeScript, and BullMQ. It features an innovative AI layer that automatically attempts to fix failing jobs by leveraging a Large Language Model (LLM) and running the proposed fixes in a secure Docker sandbox. It also includes a Memory Layer for long-term storage and retrieval of failure contexts using vector embeddings.
 
 ## Features
