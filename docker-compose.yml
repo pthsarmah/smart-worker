@@ -1,0 +1,109 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${APP_PORT:-9090}:9090"
+    environment:
+      - NODE_ENV=production
+      - APP_PORT=9090
+      - APP_REDIS_HOST=redis
+      - APP_REDIS_PORT=6379
+      - APP_DB_HOST=postgres
+      - APP_DB_PORT=5432
+      - APP_DB_USER=${APP_DB_USER:-smartworker}
+      - APP_DB_PASSWORD=${APP_DB_PASSWORD:-smartworker}
+      - APP_DB_NAME=${APP_DB_NAME:-smartworker}
+      - AI_SERVICE_URL=${AI_SERVICE_URL:-http://llm:8100}
+      - AI_MODEL_NAME=${AI_MODEL_NAME:-qwen2.5-coder-3b-instruct-q4_k_m.gguf}
+      - AI_EMBEDDING_URL=${AI_EMBEDDING_URL:-http://llm:8110}
+      - AI_EMBEDDING_MODEL=${AI_EMBEDDING_MODEL:-bge-large-en-v1.5-f32}
+      - APP_ROOT_DIR=/app
+      - EXECUTION_CONTEXT=host
+      # Optional SMTP configuration
+      - APP_SMTP_HOST=${APP_SMTP_HOST:-}
+      - APP_SMTP_PORT=${APP_SMTP_PORT:-}
+      - APP_SMTP_USER=${APP_SMTP_USER:-}
+      - APP_SMTP_PASS=${APP_SMTP_PASS:-}
+      - APP_SMTP_TO_USER=${APP_SMTP_TO_USER:-}
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - smartworker-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - smartworker-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      - POSTGRES_USER=${APP_DB_USER:-smartworker}
+      - POSTGRES_PASSWORD=${APP_DB_PASSWORD:-smartworker}
+      - POSTGRES_DB=${APP_DB_NAME:-smartworker}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - smartworker-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${APP_DB_USER:-smartworker} -d ${APP_DB_NAME:-smartworker}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Optional: Local LLM service placeholder
+  # Uncomment and configure based on your LLM setup (e.g., llama.cpp, vLLM, etc.)
+  # llm:
+  #   image: your-llm-image:latest
+  #   ports:
+  #     - "8100:8100"
+  #     - "8110:8110"
+  #   volumes:
+  #     - ./models:/models
+  #   networks:
+  #     - smartworker-network
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: 1
+  #             capabilities: [gpu]
+
+volumes:
+  redis-data:
+  postgres-data:
+
+networks:
+  smartworker-network:
+    driver: bridge

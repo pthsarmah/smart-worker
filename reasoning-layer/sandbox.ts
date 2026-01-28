@@ -1,15 +1,16 @@
-import { $ } from 'bun';
-import type { CodeChange } from './types';
-import { runFailedJob } from './run-job';
-import type { Job } from 'bullmq';
-import { destroySandbox } from './destroy-sandbox';
-import { EmailClient } from '../email';
-import { getDiffHTML } from '../utils';
+import { $ } from "bun";
+import { runFailedJob } from "./run-job";
+import type { Job } from "bullmq";
+import { destroySandbox } from "./destroy-sandbox";
+import { EmailClient } from "../email";
+import { getDiffHTML } from "../utils";
+import { logger, logSandbox } from "../logger";
+import type { CodeChange } from "../types";
 
-var ROOT_DIRECTORY = './';
+var ROOT_DIRECTORY = "./";
 
 const initPorts = (sPort: string) => {
-	return `
+    return `
 FROM oven/bun:1.0.25-alpine
 WORKDIR /app
 RUN apk add --no-cache curl
@@ -20,96 +21,113 @@ COPY --chown=sandbox:sandbox ${ROOT_DIRECTORY} .
 ENV PORT=${sPort}
 EXPOSE ${sPort}/tcp
 CMD ["sh", "-c", "redis-server --daemonize no --port 6800 & exec bun run reasoning-layer/entrypoint.ts"]
-`
-}
+`;
+};
 
 export const prepareDockerContainer = async (dockerfileContent: string) => {
-	try {
-		const bytes = await Bun.write(`${import.meta.dir}/Dockerfile.temp`, dockerfileContent);
-		if (bytes > 0) console.log("\x1b[36m%s\x1b[0m", "> Dockerfile written!");
-		else throw new Error('No bytes written');
-	} catch (e) {
-		console.error("Error creating dockerfile: ", e);
-	}
-}
+    try {
+        const bytes = await Bun.write(
+            `${import.meta.dir}/Dockerfile.temp`,
+            dockerfileContent
+        );
+        if (bytes > 0) logSandbox("dockerfile_written");
+        else throw new Error("No bytes written");
+    } catch (e) {
+        logger.error({ error: e }, "Error creating dockerfile");
+    }
+};
 
 export const buildDockerContainer = async () => {
-	const file = Bun.file(`${import.meta.dir}/Dockerfile.temp`);
-	const fileStr = await file.text();
+    const file = Bun.file(`${import.meta.dir}/Dockerfile.temp`);
+    const fileStr = await file.text();
 
-	if (!file || !fileStr) {
-		console.error("Error reading dockerfile!");
-		return;
-	}
+    if (!file || !fileStr) {
+        logger.error("Error reading dockerfile");
+        return;
+    }
 
-	await $`docker build -f ${import.meta.dir}/Dockerfile.temp -t bun-sandbox ${ROOT_DIRECTORY}`.quiet();
-}
+    await $`docker build -f ${import.meta.dir}/Dockerfile.temp -t bun-sandbox ${ROOT_DIRECTORY}`.quiet();
+};
 
 export const createDockerNetwork = async () => {
-	console.log("\x1b[34m%s\x1b[0m", "> Creating a Docker network...");
-	const existing_networks = await $`docker network ls --filter name=sandbox --format "{{.Name}}"`.text();
-	if (existing_networks.includes("sandbox")) {
-		console.log("Network already exists");
-		return;
-	}
-	await $`docker network create sandbox --driver=bridge`.quiet();
-}
+    logSandbox("creating_network");
+    const existing_networks =
+        await $`docker network ls --filter name=sandbox --format "{{.Name}}"`.text();
+    if (existing_networks.includes("sandbox")) {
+        logger.debug("Docker network already exists");
+        return;
+    }
+    await $`docker network create sandbox --driver=bridge`.quiet();
+};
 
-export const runDockerContainer = async (jobName: string, codeChanges: CodeChange[], sandboxPort: string) => {
-	console.log("\x1b[34m%s\x1b[0m", "> Testing code changes...");
-	const codeChangesJSON = JSON.stringify(codeChanges);
+export const runDockerContainer = async (
+    jobName: string,
+    codeChanges: CodeChange[],
+    sandboxPort: string
+) => {
+    logSandbox("running_container", undefined, { jobName, port: sandboxPort });
+    const codeChangesJSON = JSON.stringify(codeChanges);
 
-	const result = await $`docker run --env-file .env.docker -d --rm --memory=128m --network=sandbox --cpus=0.5 --name=bun-sandbox-${jobName} --pids-limit=64 -p ${sandboxPort}:${sandboxPort} -e APP_CODE_CHANGES=${codeChangesJSON} -e APP_PORT=${sandboxPort} bun-sandbox`;
+    const result =
+        await $`docker run --env-file .env.docker -d --rm --memory=128m --network=sandbox --cpus=0.5 --name=bun-sandbox-${jobName} --pids-limit=64 -p ${sandboxPort}:${sandboxPort} -e APP_CODE_CHANGES=${codeChangesJSON} -e APP_PORT=${sandboxPort} bun-sandbox`;
 
-	console.log(`Started container with ID: ${result.stdout.toString().trim()}`);
-}
+    logger.debug(
+        { containerId: result.stdout.toString().trim() },
+        "Started sandbox container"
+    );
+};
 
-export const spinUpSandboxAndRunAICodeChanges = async (job: Job, codeChanges: CodeChange[]) => {
+export const spinUpSandboxAndRunAICodeChanges = async (
+    job: Job,
+    codeChanges: CodeChange[]
+) => {
+    const sPort = Math.floor(Math.random() * (20000 - 10000) + 10000);
 
-	const sPort = Math.floor(Math.random() * (20000 - 10000) + 10000);
+    const dockerfileContent = initPorts(sPort.toString());
+    const jobDockerId = `${job.name}-one`;
 
-	const dockerfileContent = initPorts(sPort.toString());
-	const jobDockerId = `${job.name}-one`;
+    let res = false;
 
-	let res = false;
+    try {
+        logSandbox("preparing", job.id, { port: sPort });
+        await prepareDockerContainer(dockerfileContent);
+        await buildDockerContainer();
+        await createDockerNetwork();
+        await runDockerContainer(jobDockerId, codeChanges, sPort.toString());
 
-	try {
-		console.log("\x1b[34m%s\x1b[0m", `> Preparing sandbox for job ${job.id}`);
-		await prepareDockerContainer(dockerfileContent);
-		await buildDockerContainer();
-		await createDockerNetwork();
-		await runDockerContainer(jobDockerId, codeChanges, sPort.toString());
+        logSandbox("waiting_for_startup", job.id);
 
-		console.log("\x1b[34m%s\x1b[0m", "> Waiting for sandbox container to start...");
+        await new Promise((resolve) => setTimeout(resolve, 10000));
 
-		await new Promise(resolve => setTimeout(resolve, 10000));
+        logger.info({ jobId: job.id }, "Sandbox ready, running job");
+        const result = await runFailedJob(job, sPort.toString());
 
-		console.log("Sandbox ready. Running job...");
-		const result = await runFailedJob(job, sPort.toString());
+        if (result.success) {
+            logSandbox("job_success", job.id);
 
-		if (result.success) {
-			console.log("\x1b[36m%s\x1b[0m", `> Job ${job.id} ran successfully in sandbox.`);
-			console.log("\x1b[36m%s\x1b[0m", `> Email sent with proposed changes`);
+            const html = codeChanges
+                .map((c) => {
+                    const codeHtml = getDiffHTML(
+                        JSON.stringify(c.originalCode),
+                        JSON.stringify(c.code)
+                    );
+                    const str = `<b>Path</b>: ${c.path}<br>
+										 <b>Code</b>: <br><br><code>${codeHtml}</code><br>`;
+                    return str;
+                })
+                .join("<br><br>");
 
-			const html = codeChanges.map(c => {
-				const codeHtml = getDiffHTML(JSON.stringify(c.originalCode), JSON.stringify(c.code));
-				const str = `<b>🔍 Path</b>: ${c.path}<br>
-										 <b>🧑‍💻 Code</b>: <br><br><code>${codeHtml}</code><br>`
-				return str;
-			}).join("<br><br>");
-
-			EmailClient.Instance.sendSuccessEmail(html);
-			res = true;
-		}
-		else {
-			console.error(`Job ${job.id} failed in sandbox.`);
-			res = false;
-		}
-	} catch (error) {
-		res = false;
-		console.error(`An error occurred in sandbox for job ${job.id}:`, error);
-	} finally {
-		await destroySandbox(jobDockerId);
-		return res;
-	}
-}
+            EmailClient.Instance.sendSuccessEmail(html);
+            res = true;
+        } else {
+            logSandbox("job_failure", job.id);
+            res = false;
+        }
+    } catch (error) {
+        res = false;
+        logger.error({ error, jobId: job.id }, "Error in sandbox");
+    } finally {
+        await destroySandbox(jobDockerId);
+        return res;
+    }
+};

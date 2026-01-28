@@ -1,76 +1,83 @@
-import nodemailer, { type Transporter } from 'nodemailer';
+import nodemailer, { type Transporter } from "nodemailer";
+import { smtpConfig } from "./config";
+import { logger } from "./logger";
 
 export class EmailClient {
+    private static _instance: EmailClient;
+    private transporter: Transporter | undefined;
 
-	private static _instance: EmailClient;
-	private transporter: Transporter | undefined;
+    private readonly smtpUser: string | undefined;
+    private readonly smtpPass: string | undefined;
+    private readonly smtpToUser: string | undefined;
+    private readonly smtpHost: string | undefined;
+    private readonly smtpPort: number | undefined;
 
-	private readonly smtpUser: string | undefined;
-	private readonly smtpPass: string | undefined;
-	private readonly smtpToUser: string | undefined;
-	private readonly smtpHost: string | undefined;
+    public static get Instance() {
+        return this._instance || (this._instance = new this());
+    }
 
-	public static get Instance() {
-		return this._instance || (this._instance = new this());
-	}
+    constructor() {
+        this.smtpUser = smtpConfig.user;
+        this.smtpPass = smtpConfig.pass;
+        this.smtpHost = smtpConfig.host;
+        this.smtpPort = smtpConfig.port;
+        this.smtpToUser = smtpConfig.toUser;
 
-	constructor() {
+        if (!smtpConfig.isConfigured) {
+            logger.warn("SMTP not fully configured - email notifications disabled");
+            return;
+        }
 
-		this.smtpUser = process.env.APP_SMTP_USER;
-		this.smtpPass = process.env.APP_SMTP_PASS;
-		this.smtpHost = process.env.APP_SMTP_HOST;
-		this.smtpToUser = process.env.APP_SMTP_TO_USER;
+        this.transporter = nodemailer.createTransport({
+            host: this.smtpHost,
+            port: this.smtpPort,
+            secure: true,
+            auth: {
+                user: this.smtpUser,
+                pass: this.smtpPass,
+            },
+        });
 
-		if (!this.smtpHost || !this.smtpUser || !this.smtpPass || !this.smtpToUser) {
-			console.error("SMTP env.APP_ronment variables invalid!");
-		}
+        logger.info({ host: this.smtpHost }, "Email client initialized");
+    }
 
-		this.transporter = nodemailer.createTransport({
-			host: this.smtpHost,
-			port: parseInt(process.env.APP_SMTP_PORT!),
-			secure: true,
-			auth: {
-				user: this.smtpUser,
-				pass: this.smtpPass,
-			},
-		});
-	}
+    sendSuccessEmail = async (html: string) => {
+        if (!this.transporter) {
+            logger.warn("No transporter configuration - skipping success email");
+            return;
+        }
 
-	sendSuccessEmail = async (html: string) => {
+        try {
+            await this.transporter.sendMail({
+                from: this.smtpUser,
+                to: this.smtpToUser,
+                subject:
+                    "[ SUCCESS @ SmartWorker ] - Failed job ran successfully with these changes!",
+                html: html,
+            });
+            logger.info("Success email sent");
+        } catch (e) {
+            logger.error({ error: e }, "Error sending success email");
+        }
+    };
 
-		if (!this.transporter) {
-			console.error("No transporter configuration");
-			return;
-		}
+    sendFailedEmail = async (html: string) => {
+        if (!this.transporter) {
+            logger.warn("No transporter configuration - skipping failure email");
+            return;
+        }
 
-		try {
-			await this.transporter.sendMail({
-				from: this.smtpUser,
-				to: this.smtpToUser,
-				subject: "[ ✅ SUCCESS @ SmartWorker ] - Failed job ran successfully with these changes!",
-				html: html,
-			});
-		} catch (e: any) {
-			console.log("Error sending email: ", e);
-		}
-	};
-
-	sendFailedEmail = async (html: string) => {
-
-		if (!this.transporter) {
-			console.error("No transporter configuration");
-			return;
-		}
-
-		try {
-			await this.transporter.sendMail({
-				from: this.smtpUser,
-				to: this.smtpToUser,
-				subject: "[ ❌ FAILURE @ SmartWorker ] - Failed job could not run successfully with these changes!",
-				html: html,
-			});
-		} catch (e: any) {
-			console.log("Error sending email: ", e);
-		}
-	};
-};
+        try {
+            await this.transporter.sendMail({
+                from: this.smtpUser,
+                to: this.smtpToUser,
+                subject:
+                    "[ FAILURE @ SmartWorker ] - Failed job could not run successfully with these changes!",
+                html: html,
+            });
+            logger.info("Failure email sent");
+        } catch (e) {
+            logger.error({ error: e }, "Error sending failure email");
+        }
+    };
+}

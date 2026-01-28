@@ -1,0 +1,376 @@
+openapi: 3.0.3
+info:
+  title: SmartWorker API
+  description: |
+    SmartWorker is a job processing system with AI-powered error resolution.
+
+    This API allows you to:
+    - Create and manage jobs
+    - Monitor system health
+    - Manage the Dead Letter Queue (DLQ)
+  version: 1.0.0
+  contact:
+    name: SmartWorker
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:9090
+    description: Local development server
+
+tags:
+  - name: Jobs
+    description: Job management endpoints
+  - name: Health
+    description: System health monitoring
+  - name: DLQ
+    description: Dead Letter Queue management
+
+paths:
+  /:
+    get:
+      tags:
+        - Jobs
+      summary: Create test job
+      description: Creates a test job that will intentionally fail to trigger the AI resolution flow
+      operationId: createTestJob
+      responses:
+        '202':
+          description: Job created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateJobResponse'
+
+  /job:
+    post:
+      tags:
+        - Jobs
+      summary: Create custom job
+      description: Creates a custom job and waits for its completion
+      operationId: createJob
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateJobRequest'
+      responses:
+        '200':
+          description: Job completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobResultResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      description: Returns the health status of the system and its dependencies
+      operationId: healthCheck
+      responses:
+        '200':
+          description: System is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheckResponse'
+        '503':
+          description: System is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheckResponse'
+
+  /dlq:
+    get:
+      tags:
+        - DLQ
+      summary: List DLQ jobs
+      description: Returns a paginated list of jobs in the Dead Letter Queue
+      operationId: listDLQJobs
+      parameters:
+        - name: page
+          in: query
+          description: Page number (1-indexed)
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: pageSize
+          in: query
+          description: Number of jobs per page
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: List of DLQ jobs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DLQListResponse'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      tags:
+        - DLQ
+      summary: Clear DLQ
+      description: Removes all jobs from the Dead Letter Queue
+      operationId: clearDLQ
+      responses:
+        '200':
+          description: DLQ cleared successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: DLQ cleared
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /dlq/{jobId}/retry:
+    post:
+      tags:
+        - DLQ
+      summary: Retry DLQ job
+      description: Moves a job from the DLQ back to the main queue for retry
+      operationId: retryDLQJob
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          description: The ID of the job to retry
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Job retried successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DLQRetryResponse'
+        '404':
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /dlq/{jobId}:
+    delete:
+      tags:
+        - DLQ
+      summary: Remove DLQ job
+      description: Permanently removes a specific job from the Dead Letter Queue
+      operationId: removeDLQJob
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          description: The ID of the job to remove
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Job removed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+        '404':
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    CreateJobRequest:
+      type: object
+      required:
+        - name
+        - data
+      properties:
+        name:
+          type: string
+          description: The name/type of the job
+          example: my-custom-job
+        data:
+          type: object
+          description: Job-specific data payload
+          additionalProperties: true
+          example:
+            key: value
+            reasoning_fix: true
+
+    CreateJobResponse:
+      type: object
+      properties:
+        jobId:
+          type: string
+          description: The unique identifier of the created job
+          example: "123"
+        status:
+          type: string
+          enum: [created]
+          example: created
+
+    JobResultResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          description: Whether the job completed successfully
+        result:
+          description: The job result or error message
+
+    HealthCheckResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+          example: healthy
+        timestamp:
+          type: string
+          format: date-time
+          example: "2024-01-15T10:30:00.000Z"
+        services:
+          type: object
+          properties:
+            redis:
+              $ref: '#/components/schemas/ServiceStatus'
+            postgres:
+              $ref: '#/components/schemas/ServiceStatus'
+
+    ServiceStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [up, down]
+          example: up
+        latency:
+          type: number
+          description: Response time in milliseconds
+          example: 5
+        error:
+          type: string
+          description: Error message if service is down
+
+    DLQJob:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Job ID
+          example: "456"
+        name:
+          type: string
+          description: Job name/type
+          example: start-worker
+        data:
+          type: object
+          description: Job data payload
+          additionalProperties: true
+        failedReason:
+          type: string
+          description: The reason the job failed
+          example: "Error: Connection timeout"
+        timestamp:
+          type: integer
+          format: int64
+          description: Job creation timestamp (Unix ms)
+          example: 1705312200000
+        attemptsMade:
+          type: integer
+          description: Number of attempts made before moving to DLQ
+          example: 2
+
+    DLQListResponse:
+      type: object
+      properties:
+        jobs:
+          type: array
+          items:
+            $ref: '#/components/schemas/DLQJob'
+        total:
+          type: integer
+          description: Total number of jobs in DLQ
+          example: 15
+        page:
+          type: integer
+          description: Current page number
+          example: 1
+        pageSize:
+          type: integer
+          description: Number of items per page
+          example: 10
+
+    DLQRetryResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        newJobId:
+          type: string
+          description: The ID of the newly created job
+          example: "789"
+        error:
+          type: string
+          description: Error message if retry failed
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: string
+          description: Error message
+          example: Job not found in DLQ
